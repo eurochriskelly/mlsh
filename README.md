@@ -1,4 +1,4 @@
-# mlsh
+# mlsh (MarkLogic Shell)
 
 `mlsh` (MarkLogic shell) is a command-line, "swiss-army knife" for
 interacting with and developing MarkLogic Application. It is intended
@@ -7,66 +7,106 @@ preloaded in your user environment where it can be used across
 projects, regardless of build system.
 
 `mlsh` commands can be run with known parameters and scripted. However,
-if no parameters are provided, the will run interactively. See #Usage below.>
+if no parameters are provided, they will run interactively.
 
 ## Installation
 
 ### Download
+
 To get started, create a folder for mlsh, e.g.
-```
+
+```bash
 mkdir -p ~/.mlsh.d
 cd ~/.mlsh.d
 ```
 
-The download and unpack the release
-```
+Then download and unpack the release:
+
+```bash
 curl -s https://api.github.com/repos/eurochriskelly/mlsh/releases/latest \
   | grep zipball_url \
   | awk -F": " '{print $2}' \
   | awk -F\" '{print $2}' \
   | wget -qi - -O mlsh.zip
+unzip mlsh.zip
+mv eurochriskelly-mlsh-* mlsh
 ```
-Move the archive contents into the current folder.
 
 ### Configure
 
-Add the following to your `.profile` or equivalent init file. e.g.
+Add the following to your `.profile` or equivalent init file:
 
-`source ~/mlsh.d/init.sh`
+```bash
+source ~/.mlsh.d/mlsh/init.sh
+```
 
-First time you run, a `~/mlshrc` file is created for your environment.
-Please fix any warnings so yo have full mlsh capabilities!
+First time you run, a `~/.mlshrc` file is created for your environment.
+Please fix any warnings so you have full mlsh capabilities!
+
+### Dependencies
+
+Copy or symlink the following to `~/.mlsh.d/dependencies/`:
+
+- `corb.jar` - MarkLogic CoRB (Coordinated RBalanced) JAR
+- `xcc.jar` - MarkLogic XCC JAR
+- `mlcp/` - MarkLogic Content Pump directory
+
+Update paths in `~/.mlshrc` if you place them elsewhere.
 
 ## Updates
 
 To update to the latest version, run:
 
-`mlsh update`
+```bash
+mlsh update
+```
 
 Alternatively, if not using the release, pull the latest code using `git pull`.
 
 ## Features & Usage
 
-`mlsh`, when run alone lists all available commands. Commands are typically
+`mlsh`, when run alone, lists all available commands. Commands are typically
 interactive (but can be scripted) and run using the syntax `mlsh <command>`.
 More information on any command can be found using `mlsh help <command>`.
 
-The following table list the main features:
+### Main Commands
 
-|Command  |Description                                |
-|---------|-------------------------------------------|
-|qc       |Push and pull workspaces from database     |
-|modules  |Download modules, edit, load & reset state |
-|eval     |Evaluate a locally stored script           |
+| Command   | Description                                | Example                                  |
+|-----------|-------------------------------------------|------------------------------------------|
+| `env`     | Show/switch environments                  | `mlsh env`                               |
+| `qc`      | Push and pull workspaces from database    | `mlsh qc pull`, `mlsh qc push`           |
+| `modules` | Download modules, edit, load & reset      | `mlsh modules find`                      |
+| `eval`    | Evaluate a locally stored script          | `mlsh eval script.xqy Documents`         |
+| `corb`    | Run CoRB jobs                             | `mlsh corb --job myJob`                  |
+| `mlcp`    | Run MLCP with environment defaults        | `mlsh mlcp import --type xml ...`        |
+| `log`     | Query and follow MarkLogic logs           | `mlsh log search --pattern XDMP-AS`      |
+| `backup`  | Create and restore backups                | `mlsh backup list`, `mlsh backup create` |
+| `update`  | Update mlsh from GitHub                   | `mlsh update`                            |
 
-# Usage
+### Shortcuts
 
-## Interactive
-Commands run withoiut options should prompt the user for input.
-e.g. Transferring documents from one instance to another should be as
-simple as:
+| Alias | Command       |
+|-------|---------------|
+| `mle` | `mlsh eval`   |
+| `mlm` | `mlsh mlcp`   |
+| `mlq` | `mlsh qc`     |
+| `mlc` | `mlsh corb`   |
+| `mlr` | `mlsh rest`   |
+| `mlu` | `mlsh update` |
+| `mli` | `mlsh init`   |
 
-```
+## Usage
+
+### Interactive Mode
+
+Commands run without options will prompt the user for input.
+
+Example:
+
+```bash
+$ mlsh
+# Drops into interactive shell with custom prompt
+
 $ mlsh transfer
 mlsh v0.1.0:
   Select the source host:
@@ -74,21 +114,107 @@ mlsh v0.1.0:
   2) TST: http:/foo.bar.com
   3) ACC: http://baz.qux.com
   #? 2
-
+  
   Select the destination host:
   1) LOC: http://localhost
   #? 1
-
+  
   Select a collector or enter name of custom collector:
   1) First 100 documents
   2) My favourites list
   #? ../custom.xqy
-
-etc.
 ```
 
-## Scripting
+### Scripting Mode
 
-Check the help for scripting options as follows:
+Check the help for scripting options:
 
-`mlsh help <command>`
+```bash
+mlsh help <command>
+```
+
+Example:
+
+```bash
+# Execute a script against a specific database
+mlsh eval /path/to/script.xqy Documents
+
+# Execute with variables
+mlsh eval script.sjs App-Services "var1=value1&var2=value2"
+
+# Pull Query Console workspaces
+mlsh qc pull
+
+# List available workspaces
+mlsh qc list
+
+# Run CoRB job
+mlsh corb --job jobName --taskDir path/to/tasks --threads 4
+
+# Search logs for errors in last 10 minutes
+mlsh log show-errors --time 10m
+
+# Follow logs from specific ports
+mlsh log follow --ports 8000,8001,Error,TaskServer
+
+# Search logs for a pattern
+mlsh log search --pattern 'XDMP-AS' --ports 8000,8001
+```
+
+## Configuration
+
+The `~/.mlshrc` file configures your MarkLogic environments:
+
+```bash
+# Installation directory
+export MLSH_TOP_DIR=~/.mlsh.d/mlsh
+
+# Dependency paths
+export CORB_JAR=~/.mlsh.d/dependencies/corb.jar
+export XCC_JAR=~/.mlsh.d/dependencies/xcc.jar
+export MLCP_PATH=~/.mlsh.d/dependencies/mlcp/bin/mlcp.sh
+
+# Default environment
+export ML_ENV=local
+
+# Database names
+export ML_MODULES_DB=modules
+export ML_CONTENT_DB=content
+export ML_TRIGGERS_DB=triggers
+export ML_SCHEMAS_DB=schemas
+
+# Environment-specific settings
+case $ML_ENV in
+  local)
+    export ML_HOST=localhost
+    export ML_PORT=8000
+    export ML_USER=admin
+    export ML_PASS=admin
+    export ML_PROTOCOL=http
+    ;;
+esac
+```
+
+## Interactive Shell
+
+Running `mlsh` without arguments drops you into a custom shell with:
+
+- Custom prompt showing current environment and time
+- Session logging to `/tmp/mlsh-<session>.log`
+- Color-coded output helpers (yy, gg, rr, bb, etc.)
+- Convenient single-letter aliases
+
+```bash
+$ mlsh
+# Entering mlsh interactive shell
+# Use 'h' or 'helpme' to see available commands
+# Use 'ce' to change environment
+```
+
+## License
+
+ISC
+
+## Contributing
+
+Contributions welcome! Please submit issues and pull requests on GitHub.

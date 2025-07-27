@@ -1,7 +1,5 @@
 #!/bin/bash
 
-echo "Initializing mlsh ... "
-
 if [ ! -f "$HOME/.mlshrc" ]; then
     echo "No ~/.mlshrc file found."
     if [ ! -d "$HOME/.mlsh.d" ]; then
@@ -46,4 +44,3 @@ alias mlr="mlsh rest $@"
 alias mlu="mlsh update $@"
 alias mli="mlsh init $@"
 
-echo "Ready!"

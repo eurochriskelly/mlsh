@@ -24,7 +24,7 @@ run() {
     if [ -n "$dbChoice" ]; then database=$dbChoice; fi
     if [ -n "$modDbChoice" ]; then database=$modDbChoice; fi
     while true; do
-      echo "MLSH EVAL: DB [$database] MODB [$modulesDb]"
+      echo "MLSH: ML EVAL DB [$database] MODB [$modulesDb]"
       interactivelyRunScriptsInDir $database $modulesDb
     done
     exit 0
@@ -130,7 +130,7 @@ interactivelyRunScriptsInDir() {
   database="$(checkForDatabaseOverride $script $extension $database)"
 
   clear
-  echo "ML EVAL DB [$database] MODB [$modules]."
+  echo "MLSH: ML EVAL DB [$database] MODB [$modules]."
   echo "RUNNING: doEval $script $database $params"
   LAST_SCRIPT=$script
   LAST_EXTENSION=$extension

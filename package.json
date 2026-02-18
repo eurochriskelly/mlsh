@@ -4,7 +4,8 @@
   "description": "`mlsh` (MarkLogic shell) is a command-line, \"swiss-army knife\" for interacting with and developing MarkLogic Application. It is intended as a lowest-common-denominator tool, (fully written in bash), and preloaded in your user environment where it can be used across projects, regardless of build system.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "env-manager": "node cli/env-manager.js"
   },
   "author": "",
   "license": "ISC"

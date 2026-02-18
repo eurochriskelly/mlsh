@@ -1,0 +1,13 @@
+{
+  "name": "mlsh-env-manager",
+  "version": "1.0.0",
+  "description": "Interactive environment manager for MLSH",
+  "main": "env-manager.js",
+  "type": "module",
+  "scripts": {
+    "start": "node env-manager.js"
+  },
+  "dependencies": {
+    "prompts": "^2.4.2"
+  }
+}

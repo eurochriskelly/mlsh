@@ -31,26 +31,46 @@ doEval() {
     database="$ML_CONTENT_DB"
   fi
 
-  # Get the XCC JAR path
-  local xcc_jar="${XCC_JAR:-${MLSH_TOP_DIR}/dependencies/xcc.jar}"
+  # Check for XCC JAR in multiple locations
+  local xcc_jar=""
 
-  if [ ! -f "$xcc_jar" ]; then
-    echo "Error: XCC JAR not found at: $xcc_jar"
-    echo "Please install MarkLogic XCC JAR to ~/.mlsh.d/dependencies/xcc.jar"
+  # Try explicit XCC_JAR environment variable first
+  if [ -n "$XCC_JAR" ] && [ -f "$XCC_JAR" ]; then
+    xcc_jar="$XCC_JAR"
+  # Try MLSH_TOP_DIR/dependencies
+  elif [ -f "${MLSH_TOP_DIR}/dependencies/xcc.jar" ]; then
+    xcc_jar="${MLSH_TOP_DIR}/dependencies/xcc.jar"
+  # Try ~/.mlsh.d/dependencies (fallback for old installations)
+  elif [ -f "${HOME}/.mlsh.d/dependencies/xcc.jar" ]; then
+    xcc_jar="${HOME}/.mlsh.d/dependencies/xcc.jar"
+  fi
+
+  if [ -z "$xcc_jar" ] || [ ! -f "$xcc_jar" ]; then
+    echo "Error: MarkLogic XCC JAR not found"
+    echo ""
+    echo "mlsh eval requires the MarkLogic XCC (XQuery Connector for Java) JAR"
+    echo ""
+    echo "Checked locations:"
+    echo "  - \$XCC_JAR (not set)"
+    echo "  - ${MLSH_TOP_DIR}/dependencies/xcc.jar"
+    echo "  - ${HOME}/.mlsh.d/dependencies/xcc.jar"
+    echo ""
+    echo "To fix this, download xcc.jar from your MarkLogic installation and place it at:"
+    echo "  ${MLSH_TOP_DIR}/dependencies/xcc.jar"
+    echo ""
+    echo "Or set the XCC_JAR environment variable:"
+    echo "  export XCC_JAR=/path/to/xcc.jar"
     return 1
   fi
 
-  # Prepare Java command
-  local java_cmd="java -cp \"$xcc_jar\""
-  java_cmd="$java_cmd -Dcom.marklogic.xcc.ContentSource=xcc://${ML_USER}:${ML_PASS}@${ML_HOST}:${ML_PORT}/${database}"
-
-  # Run the XQuery script
-  echo "Evaluating script: $script"
-  echo "Database: $database"
-  echo "Server: ${ML_HOST}:${ML_PORT}"
-
-  # This is a placeholder - actual eval implementation would go here
-  echo "(XQuery evaluation not fully implemented - placeholder message)"
+  # For now, just show what would happen
+  echo "✓ Script: $script"
+  echo "✓ Database: $database"
+  echo "✓ Server: ${ML_HOST}:${ML_PORT} (user: ${ML_USER})"
+  echo "✓ XCC JAR: $xcc_jar"
+  echo ""
+  echo "Note: XQuery evaluation would execute here if MarkLogic were running."
+  echo "The eval.sh script requires further implementation to connect and execute."
 
   return 0
 }

@@ -8,7 +8,7 @@
     "mlsh": "bin/mlsh"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node cli/test-cli.js",
     "env-manager": "node cli/env-manager.js"
   },
   "keywords": [
@@ -20,7 +20,7 @@
     "mlcp",
     "corb"
   ],
-  "author": "",
+  "author": "Anomaly Co",
   "license": "ISC",
   "engines": {
     "node": ">=14.0.0"

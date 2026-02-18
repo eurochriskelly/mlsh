@@ -15,6 +15,12 @@ if no parameters are provided, they will run interactively.
 
 Install MLSH globally as an npm package:
 
+**After publishing to npm registry (coming soon):**
+```bash
+npm install -g mlsh
+```
+
+**For now, install directly from GitHub:**
 ```bash
 npm install -g git+https://github.com/anomalyco/mlsh.git
 ```

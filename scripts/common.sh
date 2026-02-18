@@ -31,46 +31,61 @@ doEval() {
     database="$ML_CONTENT_DB"
   fi
 
-  # Check for XCC JAR in multiple locations
+  # Check for XCC JAR (just for info, not actually used)
   local xcc_jar=""
-
-  # Try explicit XCC_JAR environment variable first
   if [ -n "$XCC_JAR" ] && [ -f "$XCC_JAR" ]; then
     xcc_jar="$XCC_JAR"
-  # Try MLSH_TOP_DIR/dependencies
   elif [ -f "${MLSH_TOP_DIR}/dependencies/xcc.jar" ]; then
     xcc_jar="${MLSH_TOP_DIR}/dependencies/xcc.jar"
-  # Try ~/.mlsh.d/dependencies (fallback for old installations)
   elif [ -f "${HOME}/.mlsh.d/dependencies/xcc.jar" ]; then
     xcc_jar="${HOME}/.mlsh.d/dependencies/xcc.jar"
   fi
 
-  if [ -z "$xcc_jar" ] || [ ! -f "$xcc_jar" ]; then
-    echo "Error: MarkLogic XCC JAR not found"
-    echo ""
-    echo "mlsh eval requires the MarkLogic XCC (XQuery Connector for Java) JAR"
-    echo ""
-    echo "Checked locations:"
-    echo "  - \$XCC_JAR (not set)"
-    echo "  - ${MLSH_TOP_DIR}/dependencies/xcc.jar"
-    echo "  - ${HOME}/.mlsh.d/dependencies/xcc.jar"
-    echo ""
-    echo "To fix this, download xcc.jar from your MarkLogic installation and place it at:"
-    echo "  ${MLSH_TOP_DIR}/dependencies/xcc.jar"
-    echo ""
-    echo "Or set the XCC_JAR environment variable:"
-    echo "  export XCC_JAR=/path/to/xcc.jar"
+  # Read the script file
+  local script_content=$(cat "$script")
+
+  # Create the REST API request - use digest auth for compatibility
+  echo "═══════════════════════════════════════════════════════════"
+  echo "Evaluating: $(basename "$script")"
+  echo "Database: $database"
+  echo "Server: ${ML_HOST}:${ML_PORT}"
+  echo "═══════════════════════════════════════════════════════════"
+  echo ""
+
+  # Validate curl is available
+  if ! command -v curl &>/dev/null; then
+    echo "Error: curl is required for XQuery evaluation"
     return 1
   fi
 
-  # For now, just show what would happen
-  echo "✓ Script: $script"
-  echo "✓ Database: $database"
-  echo "✓ Server: ${ML_HOST}:${ML_PORT} (user: ${ML_USER})"
-  echo "✓ XCC JAR: $xcc_jar"
+  # Validate MarkLogic is reachable
+  if ! curl -s --max-time 2 --digest -u "${ML_USER}:${ML_PASS}" \
+    "http://${ML_HOST}:${ML_PORT}/" >/dev/null 2>&1; then
+    echo "Error: Cannot connect to MarkLogic at ${ML_HOST}:${ML_PORT}"
+    return 1
+  fi
+
+  # Execute the XQuery via REST API
+  local rest_url="http://${ML_HOST}:${ML_PORT}/v1/eval"
+  local start_time=$(date +%s)
+
+  # Make the request
+  local response=$(curl -s --digest -u "${ML_USER}:${ML_PASS}" \
+    -X POST "$rest_url" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "xquery=$(printf '%s' "$script_content" | jq -sRr @uri)&db=$database" \
+    2>&1)
+
+  local end_time=$(date +%s)
+  local elapsed=$((end_time - start_time))
+
+  # Parse and display the response
+  echo "Result:"
+  echo "───────────────────────────────────────────────────────────"
+  echo "$response" | grep -v "^--" | grep -v "Content-Type:" | grep -v "X-Primitive:" | grep -v "^$"
+  echo "───────────────────────────────────────────────────────────"
+  echo "Execution time: ${elapsed}s"
   echo ""
-  echo "Note: XQuery evaluation would execute here if MarkLogic were running."
-  echo "The eval.sh script requires further implementation to connect and execute."
 
   return 0
 }

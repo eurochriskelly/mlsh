@@ -6,136 +6,107 @@ source $MLSH_TOP_DIR/scripts/common.sh
 main() {
   local option=$1
   local logtype=${2:-error}
+
   if [ -z "$option" ]; then
     # Ask user to select from known options
-    echo "Please select from the following options:"
-    echo "1. show-errors "
-    echo "2. search"
-    echo "3. follow"
-    echo -n "Enter your choice: "
+    echo "MarkLogic Log Viewer"
+    echo "===================="
+    echo ""
+    echo "1. show-errors   - Display recent error log entries"
+    echo "2. show-access   - Display recent access log entries"
+    echo "3. search        - Search logs for a pattern"
+    echo "4. follow        - Follow logs in real-time"
+    echo ""
+    echo -n "Enter your choice (1-4): "
     read choice
     case $choice in
-      1) option="show-errors" ;;
-      2) option="search" ;;
-      3)
-        shift
-        option="follow"
-        if [ -n "$1" ]; then
-          case $1 in
-            -e) logtype="error" ;;
-            -a) logtype="access" ;;
-            *) echo "Unknown log type [$1]. Must be one of [-e|-a]"; return ;;
-          esac
-        fi
-        ;;
-      *)
-        echo "Unknown option [$option]"
-        echo "Please select an option [show-errors/search/follow]"
-        echo "e.g."
-        echo "mlsh log show-errors"
-        cd $MLSH_TOP_DIR
-        return
-        ;;
-
+    1) option="show-errors" ;;
+    2) option="show-access" ;;
+    3) option="search" ;;
+    4) option="follow" ;;
+    *)
+      echo "Unknown option [$choice]"
+      return 1
+      ;;
     esac
-    echo "User selected option [$option]"
   fi
 
   case $option in
-    show-errors)
-      showErrors
-      ;;
+  show-errors)
+    showLogs "error" 50
+    ;;
 
-    search)
-      shift
-      search "$@"
-      ;;
+  show-access)
+    showLogs "access" 50
+    ;;
 
-    follow)
-      follow $logtype
-      ;;
+  search)
+    shift
+    search "$@"
+    ;;
 
-    *)
-      # Let user select one of the known options
-      echo "Unknown option [$option]"
-      echo "Please select an option [show-errors/search/follow]"
-      echo "e.g."
-      echo "log show-errors"
-      cd $MLSH_TOP_DIR
-      return
-      ;;
+  follow)
+    follow $logtype
+    ;;
+
+  *)
+    echo "Unknown option [$option]"
+    echo "Please select an option [show-errors/show-access/search/follow]"
+    echo "e.g. mlsh logs show-errors"
+    return 1
+    ;;
   esac
-}
-
-# Show errors in the log in the past X minutes
-showErrors() {
-  local minutes=$1
-  if [ -z "$minutes" ]; then
-    echo -n "Please enter the number of minutes to search: "
-    read minutes
-  fi
-  echo "Searching for errors in the past [$minutes] minutes"
-  local results=$(doEval showErrors "${ML_MODULES_DB}" '{"MINUTES":"$minutes"}')
-  echo $results
 }
 
 search() {
   local pattern=$1
   if [ -z "$pattern" ]; then
-    echo -n "Please enter a pattern to match (e.g. *foo.xqy): "
-    read $pattern
+    echo -n "Please enter a search pattern (e.g. 'XDMP-AS'): "
+    read pattern
   fi
-  shift
-  local minutes=$1
-  if [ -z "$minutes" ]; then
-    echo -n "How many minutes: "
-    read $minutes
-  fi
-  echo "Searching for logs matching [$pattern]"
-  local results=$(doEval recentErrors "${ML_MODULES_DB}" '{"PATTERN":"'$pattern'","MINUTES":"'$minutes'"}')
-  echo "$results"|tail -n 1|awk '{print $1 " " $2}'
-  echo "==="
-  echo "$results"
+
+  echo "Searching logs for pattern: $pattern"
+  echo "═══════════════════════════════════════════════════════════"
+
+  # Create XQuery to search logs
+  local tmp_xqy=$(mktemp)
+  cat >"$tmp_xqy" <<EOF
+(: Search logs for pattern :)
+let \$logs := xdmp:get-request-error-log(xdmp:request-timestamp(xdmp:request()) - 3600, fn:current-dateTime())
+return \$logs[contains(., '$pattern')]
+EOF
+
+  doEval "$tmp_xqy"
+  rm -f "$tmp_xqy"
 }
 
 follow() {
   local logtype=$1
-  local results=$(doEval recentErrors "App-Services" '{"INITIALIZE":"1"}')
-  local day=
-  local time=
-  local minutes=1
-  local params=$(toJson DAY:$day,TIME:$time,MINUTES:$minutes)
-  # TODO: make log fall asleep if there is not activity for a while
+  echo "Following logs (press Ctrl+C to stop)..."
+  echo "═══════════════════════════════════════════════════════════"
+
   case $logtype in
-    error)
-      while true;do
-        local results=$(doEval recentErrors "${ML_MODULES_DB}" '{"DAY":"'$day'","TIME":"'$time'","MINUTES":"'$minutes'","TYPE":"'$logtype'"}')
-        if [ -n "$results" ]; then
-          echo "$results"
-        fi
-        sleep 5
-        if [ -n "$results" ]; then
-          day=$(echo "$results"|grep "^20"|tail -n 1|awk '{print $1}')
-          time=$(echo "$results"|grep "^20"|tail -n 1|awk '{print $2}')
-        fi
-        minutes=
-      done
-      ;;
-    access)
-      # TODO: Run also Error log tailing using server varable to track last time
-      while true;do
-        local results=$(doEval recentAccess "${ML_MODULES_DB}" '{"FLAGS":"no-eval+no-moz"}')
-        if [ -n "$results" ]; then  echo "$results"|column -s, -t;fi
-        sleep 5
-      done
-      ;;
-    *)
-      echo "Unknown log type [$logtype]. Must be one of [ErrorLog|AccessLog]"
-      return
-      ;;
+  error)
+    while true; do
+      showLogs "error" 20
+      echo ""
+      echo "Waiting 5 seconds for new logs..."
+      sleep 5
+    done
+    ;;
+  access)
+    while true; do
+      showLogs "access" 20
+      echo ""
+      echo "Waiting 5 seconds for new logs..."
+      sleep 5
+    done
+    ;;
+  *)
+    echo "Unknown log type [$logtype]. Must be one of [error|access]"
+    return 1
+    ;;
   esac
-
-
 }
 
 main "$@"

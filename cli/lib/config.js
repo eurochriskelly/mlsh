@@ -125,12 +125,11 @@ export class ConfigManager {
         }
       }
       
-      // Also export key paths with defaults
-      content += '\n# Key paths (with defaults)\n';
-      content += ': ${MLSH_TOP_DIR:=~/.mlsh.d}\n';
-      content += 'export CORB_JAR=${MLSH_TOP_DIR}/dependencies/corb.jar\n';
-      content += 'export XCC_JAR=${MLSH_TOP_DIR}/dependencies/xcc.jar\n';
-      content += 'export MLCP_PATH=${MLSH_TOP_DIR}/dependencies/mlcp/bin/mlcp.sh\n';
+      // Also export key paths - always use ~/.mlsh.d for dependencies
+      content += '\n# Key paths (dependencies are always in ~/.mlsh.d)\n';
+      content += 'export CORB_JAR=${HOME:-~}/.mlsh.d/dependencies/corb.jar\n';
+      content += 'export XCC_JAR=${HOME:-~}/.mlsh.d/dependencies/xcc.jar\n';
+      content += 'export MLCP_PATH=${HOME:-~}/.mlsh.d/dependencies/mlcp/bin/mlcp.sh\n';
       
       fs.writeFileSync(BASH_GEN_FILE, content);
     } catch (err) {

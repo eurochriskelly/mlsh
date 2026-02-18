@@ -1,12 +1,48 @@
 {
   "name": "mlsh",
-  "version": "0.0.0",
-  "description": "`mlsh` (MarkLogic shell) is a command-line, \"swiss-army knife\" for interacting with and developing MarkLogic Application. It is intended as a lowest-common-denominator tool, (fully written in bash), and preloaded in your user environment where it can be used across projects, regardless of build system.",
+  "version": "1.0.0",
+  "description": "MarkLogic shell - A command-line swiss-army knife for interacting with and developing MarkLogic applications",
   "main": "index.js",
+  "type": "module",
+  "bin": {
+    "mlsh": "bin/mlsh"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "env-manager": "node cli/env-manager.js"
   },
+  "keywords": [
+    "marklogic",
+    "shell",
+    "cli",
+    "dev-tools",
+    "xquery",
+    "mlcp",
+    "corb"
+  ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anomalyco/mlsh.git"
+  },
+  "homepage": "https://github.com/anomalyco/mlsh",
+  "bugs": {
+    "url": "https://github.com/anomalyco/mlsh/issues"
+  },
+  "files": [
+    "bin/",
+    "cli/",
+    "scripts/",
+    "shell/",
+    "templates/",
+    "init.sh",
+    "mlshrc.template",
+    "README.md",
+    "CLI_README.md",
+    "INSTALLATION.md"
+  ]
 }

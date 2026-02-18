@@ -9,6 +9,27 @@ projects, regardless of build system.
 `mlsh` commands can be run with known parameters and scripted. However,
 if no parameters are provided, they will run interactively.
 
+## Quick Start
+
+### Global Installation (Recommended)
+
+Install MLSH globally as an npm package:
+
+```bash
+npm install -g git+https://github.com/anomalyco/mlsh.git
+```
+
+Then use it from anywhere:
+
+```bash
+mlsh          # Start interactive MLSH shell
+mlsh env      # Change environment interactively
+mlsh eval     # Evaluate XQuery/JavaScript
+mlsh logs     # View MarkLogic logs
+```
+
+See [NPM_INSTALLATION.md](./NPM_INSTALLATION.md) for more details.
+
 ## Installation
 
 ### Download

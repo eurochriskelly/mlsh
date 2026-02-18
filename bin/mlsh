@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+
+/**
+ * MLSH - MarkLogic Shell
+ * Entry point for global npm installation
+ *
+ * This Node.js wrapper discovers the mlsh installation and
+ * delegates to the bash implementation.
+ */
+
+import { spawn } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Get the mlsh installation directory
+// When installed globally, this will be in node_modules/mlsh
+const MLSH_TOP_DIR = path.resolve(__dirname, '..');
+
+// Verify key files exist
+const requiredFiles = [
+  'scripts/mlsh.sh',
+  'init.sh',
+  'mlshrc.template'
+];
+
+const missingFiles = requiredFiles.filter(file => {
+  return !fs.existsSync(path.join(MLSH_TOP_DIR, file));
+});
+
+if (missingFiles.length > 0) {
+  console.error('Error: MLSH installation appears to be incomplete.');
+  console.error('Missing files:');
+  missingFiles.forEach(f => console.error(`  - ${f}`));
+  console.error(`Installation directory: ${MLSH_TOP_DIR}`);
+  process.exit(1);
+}
+
+// Set up environment
+process.env.MLSH_TOP_DIR = MLSH_TOP_DIR;
+
+// Get command and arguments
+const [, , ...args] = process.argv;
+
+// If no arguments, run init and drop to shell
+if (args.length === 0) {
+  console.log('Initializing MLSH...');
+  runBash(['--init-file', path.join(MLSH_TOP_DIR, 'init.sh'), '-i']);
+  process.exit(0);
+} else {
+  // Otherwise, run the bash mlsh.sh script
+  runBashScript(args);
+}
+
+/**
+ * Run a bash script with arguments
+ */
+function runBashScript(args) {
+  const bash = spawn('bash', [path.join(MLSH_TOP_DIR, 'scripts/mlsh.sh'), ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, MLSH_TOP_DIR }
+  });
+
+  bash.on('error', (err) => {
+    console.error('Error running mlsh:', err.message);
+    process.exit(1);
+  });
+
+  bash.on('exit', (code) => {
+    process.exit(code || 0);
+  });
+}
+
+/**
+ * Run interactive bash shell
+ */
+function runBash(bashArgs) {
+  const bash = spawn('bash', bashArgs, {
+    stdio: 'inherit',
+    env: { ...process.env, MLSH_TOP_DIR }
+  });
+
+  bash.on('error', (err) => {
+    console.error('Error starting shell:', err.message);
+    process.exit(1);
+  });
+
+  bash.on('exit', (code) => {
+    process.exit(code || 0);
+  });
+}

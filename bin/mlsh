@@ -57,9 +57,27 @@ if (args.length === 0) {
  * Run a bash script with arguments
  */
 function runBashScript(args) {
+  // Create environment with MLSH_TOP_DIR override
+  // Use 'env -i' to start with a clean environment, then add back necessary vars
+  const env = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    USER: process.env.USER,
+    SHELL: process.env.SHELL,
+    TERM: process.env.TERM,
+    MLSH_TOP_DIR // This is the key - explicitly set to repo location
+  };
+  
+  // Copy over any user-specific env vars (but MLSH_TOP_DIR will override)
+  for (const key of Object.keys(process.env)) {
+    if (!env.hasOwnProperty(key) && (key.startsWith('ML_') || key.startsWith('MLCP_'))) {
+      env[key] = process.env[key];
+    }
+  }
+  
   const bash = spawn('bash', [path.join(MLSH_TOP_DIR, 'scripts/mlsh.sh'), ...args], {
     stdio: 'inherit',
-    env: { ...process.env, MLSH_TOP_DIR }
+    env
   });
 
   bash.on('error', (err) => {

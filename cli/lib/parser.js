@@ -94,10 +94,15 @@ export function generateBashMlshrc(config) {
 # This file is generated from .mlshrc.json
 # Edits here may be overwritten - modify .mlshrc.json instead
 
-export MLSH_TOP_DIR=~/.mlsh.d
-export CORB_JAR=~/.mlsh.d/dependencies/corb.jar
-export XCC_JAR=~/.mlsh.d/dependencies/xcc.jar
-export MLCP_PATH=~/.mlsh.d/dependencies/mlcp/bin/mlcp.sh
+# Note: MLSH_TOP_DIR is set by the entry point, do not override it here
+# If needed, set it before sourcing this file:
+# export MLSH_TOP_DIR=/path/to/mlsh
+
+# Default paths (only used if MLSH_TOP_DIR is not set)
+: \${MLSH_TOP_DIR:=~/.mlsh.d}
+export CORB_JAR=\${MLSH_TOP_DIR}/dependencies/corb.jar
+export XCC_JAR=\${MLSH_TOP_DIR}/dependencies/xcc.jar
+export MLCP_PATH=\${MLSH_TOP_DIR}/dependencies/mlcp/bin/mlcp.sh
 
 # Default database names
 export ML_MODULES_DB=modules

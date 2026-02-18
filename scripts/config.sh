@@ -3,7 +3,7 @@
 # Environment manager - now integrated with Node.js CLI
 # Falls back to bash implementation if Node.js is not available
 
-source $MLSH_TOP_DIR/node_modules/mlsh-core/scripts/common.sh >/dev/null 2>&1
+source $MLSH_TOP_DIR/scripts/common.sh >/dev/null 2>&1
 
 main() {
   local env=$1

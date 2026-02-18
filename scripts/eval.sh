@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source $MLSH_TOP_DIR/node_modules/mlsh-core/scripts/common.sh
+source $MLSH_TOP_DIR/scripts/common.sh
 LAST_SCRIPT=
 
 showHelp() {
@@ -29,14 +29,18 @@ run() {
     done
     exit 0
   else
+    # Parse arguments - support both positional and named arguments
+    local script=
+    local database=
+    local params=
+    local positional_index=0
+
     while [[ $# -gt 0 ]]; do
       case $1 in
       --script | -s)
         shift
         script=$1
         shift
-        # Check if file has extension. If yes then remove it.
-        # It will be found and added by the script
         if [[ $script == *.* ]]; then
           script=${script%.*}
         fi
@@ -48,7 +52,6 @@ run() {
         shift
         ;;
 
-      # Better to pass vars as A:B,C:D
       --vars | -v)
         shift
         params=$(toJson $1)
@@ -67,7 +70,17 @@ run() {
         ;;
 
       *)
-        echo "Unknown option [$1]"
+        # Handle positional arguments
+        if [ -z "$script" ]; then
+          script=$1
+          if [[ $script == *.* ]]; then
+            script=${script%.*}
+          fi
+        elif [ -z "$database" ]; then
+          database=$1
+        elif [ -z "$params" ]; then
+          params=$1
+        fi
         shift
         ;;
       esac

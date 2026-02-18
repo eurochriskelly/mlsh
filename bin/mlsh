@@ -45,11 +45,9 @@ process.env.MLSH_TOP_DIR = MLSH_TOP_DIR;
 // Get command and arguments
 const [, , ...args] = process.argv;
 
-// If no arguments, run init and drop to shell
+// If no arguments, show help
 if (args.length === 0) {
-  console.log('Initializing MLSH...');
-  runBash(['--init-file', path.join(MLSH_TOP_DIR, 'init.sh'), '-i']);
-  process.exit(0);
+  runBashScript(['help']);
 } else {
   // Otherwise, run the bash mlsh.sh script
   runBashScript(args);
@@ -74,21 +72,4 @@ function runBashScript(args) {
   });
 }
 
-/**
- * Run interactive bash shell
- */
-function runBash(bashArgs) {
-  const bash = spawn('bash', bashArgs, {
-    stdio: 'inherit',
-    env: { ...process.env, MLSH_TOP_DIR }
-  });
 
-  bash.on('error', (err) => {
-    console.error('Error starting shell:', err.message);
-    process.exit(1);
-  });
-
-  bash.on('exit', (code) => {
-    process.exit(code || 0);
-  });
-}

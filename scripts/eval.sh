@@ -41,7 +41,8 @@ run() {
         shift
         script=$1
         shift
-        if [[ $script == *.* ]]; then
+        # Only strip extension if file doesn't exist with extension
+        if [[ $script == *.* && ! -f "$script" ]]; then
           script=${script%.*}
         fi
         ;;
@@ -73,7 +74,8 @@ run() {
         # Handle positional arguments
         if [ -z "$script" ]; then
           script=$1
-          if [[ $script == *.* ]]; then
+          # Only strip extension if file doesn't exist with extension
+          if [[ $script == *.* && ! -f "$script" ]]; then
             script=${script%.*}
           fi
         elif [ -z "$database" ]; then

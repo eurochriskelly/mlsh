@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOME = process.env.HOME || process.env.USERPROFILE;
 const CONFIG_FILE = path.join(HOME, '.mlshrc.json');
 const BASH_CONFIG_FILE = path.join(HOME, '.mlshrc');
+const BASH_GEN_FILE = path.join(HOME, '.mlshrc-gen');
 
 export class ConfigManager {
   constructor() {
@@ -101,8 +102,39 @@ export class ConfigManager {
     try {
       const bashContent = generateBashMlshrc(this.config);
       fs.writeFileSync(BASH_CONFIG_FILE, bashContent);
+      
+      // Also generate .mlshrc-gen with the current environment variables
+      this.generateMlshrcGen();
     } catch (err) {
       console.error('Error syncing to bash config:', err.message);
+    }
+  }
+
+  generateMlshrcGen() {
+    try {
+      const currentEnv = this.config.currentEnv || 'local';
+      const envVars = this.config.environments[currentEnv] || {};
+      
+      let content = '#!/bin/bash\n';
+      
+      // Export all ML_* variables for the current environment
+      for (const [key, value] of Object.entries(envVars)) {
+        if (key.startsWith('ML_')) {
+          const escapedValue = String(value).replace(/"/g, '\\"');
+          content += `export ${key}="${escapedValue}"\n`;
+        }
+      }
+      
+      // Also export key paths with defaults
+      content += '\n# Key paths (with defaults)\n';
+      content += ': ${MLSH_TOP_DIR:=~/.mlsh.d}\n';
+      content += 'export CORB_JAR=${MLSH_TOP_DIR}/dependencies/corb.jar\n';
+      content += 'export XCC_JAR=${MLSH_TOP_DIR}/dependencies/xcc.jar\n';
+      content += 'export MLCP_PATH=${MLSH_TOP_DIR}/dependencies/mlcp/bin/mlcp.sh\n';
+      
+      fs.writeFileSync(BASH_GEN_FILE, content);
+    } catch (err) {
+      console.error('Error generating .mlshrc-gen:', err.message);
     }
   }
 

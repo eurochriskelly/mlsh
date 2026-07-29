@@ -21,11 +21,34 @@ declare variable $limit as xs:string external := "200";
 declare variable $max as xs:integer :=
   try { xs:integer($limit) } catch ($e) { 200 };
 
+(: Escape one regex metacharacter at a time, outside of any character class.
+ : A single bracket-expression escaping all metacharacters at once (the
+ : previous approach) is invalid in MarkLogic's XSD-flavored regex engine -
+ : most of . + ^ $ ( ) { } | lose their special meaning inside [...] and
+ : escaping them there raises XDMP-REGEX. Escaping them individually as plain
+ : (non-class) atoms is the portable way to do this. Order: backslash first,
+ : since later steps must not touch backslashes introduced by earlier ones. :)
+declare function local:regex-escape($s as xs:string) as xs:string
+{
+  let $s := fn:replace($s, '\\', '\\\\')
+  let $s := fn:replace($s, '\.', '\\.')
+  let $s := fn:replace($s, '\^', '\\^')
+  let $s := fn:replace($s, '\$', '\\$')
+  let $s := fn:replace($s, '\(', '\\(')
+  let $s := fn:replace($s, '\)', '\\)')
+  let $s := fn:replace($s, '\[', '\\[')
+  let $s := fn:replace($s, '\]', '\\]')
+  let $s := fn:replace($s, '\{', '\\{')
+  let $s := fn:replace($s, '\}', '\\}')
+  let $s := fn:replace($s, '\|', '\\|')
+  let $s := fn:replace($s, '\+', '\\+')
+  return $s
+};
+
 (: Translate a glob (*, ?) into an anchored, case-insensitive regex. :)
 declare function local:glob-to-regex($glob as xs:string) as xs:string
 {
-  let $escaped :=
-    fn:replace($glob, '([.\\+^$\[\]{}()|/-])', '\\$1')
+  let $escaped := local:regex-escape($glob)
   let $wild := fn:replace(fn:replace($escaped, '\*', '.*'), '\?', '.')
   return '^' || $wild || '$'
 };

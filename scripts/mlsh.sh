@@ -7,7 +7,8 @@ test -f $HOME/.mlshrc-gen && source $HOME/.mlshrc-gen
 mlsh_command() {
   local cmd=$1
   shift
-  local args=($@)
+  # Preserve quoted globs and values with spaces when forwarding commands.
+  local args=("$@")
   # Commands that don't require an environment
   local no_env_cmds=("env" "mlenv" "showenv" "init" "helpme" "help" "update")
   local needs_env=true

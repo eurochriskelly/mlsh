@@ -4,6 +4,7 @@ import assert from 'assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { spawnSync } from 'child_process';
 import {
   activateEnvironment,
   configDirectory,
@@ -62,6 +63,16 @@ try {
     assert.equal(settings.host, 'localhost');
     assert.match(generated, /export ML_ENV="dev"/);
     assert.match(generated, /export ML_CONTENT_DB="content"/);
+  });
+
+  test('preserves quoted glob arguments in the command dispatcher', () => {
+    const script = path.resolve('scripts/mlsh.sh');
+    const result = spawnSync('bash', ['-c', `source "${script}"; mlsh_command modules '*tran*'`], {
+      cwd: home,
+      env: { ...process.env, HOME: home, MLSH_TOP_DIR: path.resolve('.'), ML_ENV: 'test' },
+      encoding: 'utf8'
+    });
+    assert.match(result.stdout, /No modules match '\*tran\*'/);
   });
 } finally {
   fs.rmSync(home, { recursive: true, force: true });

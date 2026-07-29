@@ -3,7 +3,9 @@
 test -f "$HOME/.mlshrc-gen" && source "$HOME/.mlshrc-gen"
 source "$MLSH_TOP_DIR/scripts/mlsh.sh"
 export MLSH_INTERACTIVE=1
-export MLSH_SESSION_LOG="${TMPDIR:-/tmp}/mlsh-$(date +%Y%m%d-%H%M%S).log"
+export MLSH_LOG_DIR="$HOME/.mlsh/logs"
+mkdir -p "$MLSH_LOG_DIR"
+export MLSH_SESSION_LOG="$MLSH_LOG_DIR/session-$(date +%Y%m%d-%H%M%S).log"
 touch "$MLSH_SESSION_LOG"
 
 mlsh_reset=$'\033[0m'
@@ -36,6 +38,7 @@ mlsh_help() {
   mlsh_command_line 'corb <args>' 'Run CoRB'
   mlsh_command_line 'modules <command>' 'Manage modules'
   mlsh_command_line 'backup <command>' 'Manage backups'
+  mlsh_command_line 'session-log [show]' 'Locate or view this session log'
   mlsh_command_line 'help <command>' 'Show detailed command help'
   mlsh_command_line 'exit' 'Leave MLSH'
   printf '\n%sTip:%s ordinary shell commands such as %scd%s, %sgit%s, pipes, and redirection work too.\n' \
@@ -69,6 +72,17 @@ modules() { mlsh_run modules "$@"; }
 module() { mlsh_run module "$@"; }
 backup() { mlsh_run backup "$@"; }
 update() { mlsh_run update "$@"; }
+session-log() {
+  if [ "$1" = "show" ]; then
+    if command -v less >/dev/null 2>&1; then
+      less -R "$MLSH_SESSION_LOG"
+    else
+      cat "$MLSH_SESSION_LOG"
+    fi
+  else
+    echo "$MLSH_SESSION_LOG"
+  fi
+}
 
 alias h=help
 alias q=qc
@@ -84,5 +98,6 @@ printf '%s%s | |\/| | |   \___ \| |_| |%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_
 printf '%s%s |_|  |_|_|   |____/ \___/ %s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
 printf '%sMarkLogic shell%s  %sEnvironment: %s%s%s\n' \
   "$mlsh_muted" "$mlsh_reset" "$mlsh_muted" "$mlsh_cyan" "${ML_ENV:-none}" "$mlsh_reset"
-printf '%sSession log:%s %s\n' "$mlsh_muted" "$mlsh_reset" "$MLSH_SESSION_LOG"
+printf '%sSession log:%s %s  %s(use session-log show to view)%s\n' \
+  "$mlsh_muted" "$mlsh_reset" "$MLSH_SESSION_LOG" "$mlsh_muted" "$mlsh_reset"
 mlsh_help

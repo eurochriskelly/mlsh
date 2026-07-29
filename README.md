@@ -287,6 +287,10 @@ mlsh [dev]> git status
 mlsh [dev]> exit
 ```
 
+Each interactive shell session writes MLSH command output to
+`~/.mlsh/logs/session-YYYYMMDD-HHMMSS.log`. Run `session-log` to print the
+current log path or `session-log show` to view it.
+
 ## License
 
 ISC

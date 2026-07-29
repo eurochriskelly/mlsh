@@ -33,7 +33,7 @@ findModules() {
     read -r -p "Pattern to match (for example, *foo.xqy): " pattern
   fi
   local results
-  results=$(doEval "$MLSH_TOP_DIR/scripts/eval/moduleLister.xqy" "$ML_MODULES_DB" "{\"pattern\":\"${pattern}\"}") || {
+  results=$(MLSH_EVAL_QUIET=1 doEval "$MLSH_TOP_DIR/scripts/eval/moduleLister.xqy" "$ML_MODULES_DB" "{\"pattern\":\"${pattern}\"}") || {
     printf '%s\n' "$results"
     return 1
   }

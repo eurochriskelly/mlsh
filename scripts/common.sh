@@ -52,13 +52,14 @@ doEval() {
   # Read the script file
   local script_content=$(cat "$script")
 
-  # Create the REST API request - use digest auth for compatibility
-  echo "═══════════════════════════════════════════════════════════"
-  echo "Evaluating: $(basename "$script")"
-  echo "Database: $database"
-  echo "Server: ${ML_HOST}:${ML_PORT}"
-  echo "═══════════════════════════════════════════════════════════"
-  echo ""
+  if [ "$MLSH_EVAL_QUIET" != "1" ]; then
+    echo "═══════════════════════════════════════════════════════════"
+    echo "Evaluating: $(basename "$script")"
+    echo "Database: $database"
+    echo "Server: ${ML_HOST}:${ML_PORT}"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+  fi
 
   # Validate curl is available
   if ! command -v curl &>/dev/null; then
@@ -68,32 +69,40 @@ doEval() {
 
   # Validate MarkLogic is reachable
   if ! curl -s --max-time 2 --digest -u "${ML_USER}:${ML_PASS}" \
-    "http://${ML_HOST}:${ML_PORT}/" >/dev/null 2>&1; then
+    "${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}/" >/dev/null 2>&1; then
     echo "Error: Cannot connect to MarkLogic at ${ML_HOST}:${ML_PORT}"
     return 1
   fi
 
   # Execute the XQuery via REST API
-  local rest_url="http://${ML_HOST}:${ML_PORT}/v1/eval"
+  local rest_url="${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}/v1/eval"
   local start_time=$(date +%s)
 
-  # Make the request
-  local response=$(curl -s --digest -u "${ML_USER}:${ML_PASS}" \
+  local curl_args=(
+    -s --digest -u "${ML_USER}:${ML_PASS}"
     -X POST "$rest_url" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "xquery=$(printf '%s' "$script_content" | jq -sRr @uri)&db=$database" \
-    2>&1)
+    -H "Content-Type: application/x-www-form-urlencoded"
+    --data-urlencode "xquery=$script_content"
+    --data-urlencode "db=$database"
+  )
+  if [ -n "$params" ]; then
+    curl_args+=(--data-urlencode "vars=$params")
+  fi
+  local response=$(curl "${curl_args[@]}" 2>&1)
 
   local end_time=$(date +%s)
   local elapsed=$((end_time - start_time))
 
-  # Parse and display the response
-  echo "Result:"
-  echo "───────────────────────────────────────────────────────────"
-  echo "$response" | grep -v "^--" | grep -v "Content-Type:" | grep -v "X-Primitive:" | grep -v "^$"
-  echo "───────────────────────────────────────────────────────────"
-  echo "Execution time: ${elapsed}s"
-  echo ""
+  if [ "$MLSH_EVAL_QUIET" = "1" ]; then
+    printf '%s\n' "$response"
+  else
+    echo "Result:"
+    echo "───────────────────────────────────────────────────────────"
+    echo "$response" | grep -v "^--" | grep -v "Content-Type:" | grep -v "X-Primitive:" | grep -v "^$"
+    echo "───────────────────────────────────────────────────────────"
+    echo "Execution time: ${elapsed}s"
+    echo ""
+  fi
 
   return 0
 }

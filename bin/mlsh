@@ -45,12 +45,33 @@ process.env.MLSH_TOP_DIR = MLSH_TOP_DIR;
 // Get command and arguments
 const [, , ...args] = process.argv;
 
-// Start the interactive MLSH shell when no command is supplied.
-if (args.length === 0) {
+if (args[0] === 'session-log') {
+  showLog(args.slice(1));
+} else if (args.length === 0) {
+  // Start the interactive MLSH shell when no command is supplied.
   runInteractiveShell();
 } else {
   // Otherwise, run the bash mlsh.sh script
   runBashScript(args);
+}
+
+function logFilePath() {
+  return path.join(process.env.HOME, '.mlsh', 'mlsh.log');
+}
+
+function showLog(args) {
+  const logFile = logFilePath();
+  if (args[0] === 'show') {
+    const pager = process.env.PAGER || 'less';
+    const viewer = spawn(pager, ['-R', logFile], { stdio: 'inherit' });
+    viewer.on('error', () => {
+      const fallback = spawn('cat', [logFile], { stdio: 'inherit' });
+      fallback.on('exit', code => process.exit(code || 0));
+    });
+    viewer.on('exit', code => process.exit(code || 0));
+  } else {
+    console.log(logFile);
+  }
 }
 
 function runInteractiveShell() {
@@ -89,6 +110,14 @@ function runBashScript(args) {
 }
 
 function shellEnvironment() {
+  const logDirectory = path.join(process.env.HOME, '.mlsh');
+  const logFile = path.join(logDirectory, 'mlsh.log');
+  fs.mkdirSync(logDirectory, { recursive: true, mode: 0o700 });
+  if (fs.existsSync(logFile) && fs.statSync(logFile).size > 10 * 1024 * 1024) {
+    fs.truncateSync(logFile, 0);
+  }
+  if (!fs.existsSync(logFile)) fs.closeSync(fs.openSync(logFile, 'a', 0o600));
+
   const env = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
@@ -96,6 +125,7 @@ function shellEnvironment() {
     SHELL: process.env.SHELL,
     TERM: process.env.TERM,
     EDITOR: process.env.EDITOR,
+    MLSH_LOG_FILE: logFile,
     MLSH_TOP_DIR // This is the key - explicitly set to repo location
   };
   

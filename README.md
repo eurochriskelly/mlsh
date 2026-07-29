@@ -287,9 +287,9 @@ mlsh [dev]> git status
 mlsh [dev]> exit
 ```
 
-Each interactive shell session writes MLSH command output to
-`~/.mlsh/logs/session-YYYYMMDD-HHMMSS.log`. Run `session-log` to print the
-current log path or `session-log show` to view it.
+MLSH command output is appended to the fixed application log
+`~/.mlsh/mlsh.log`. MLSH truncates that file on startup only when it exceeds
+10 MB. Run `session-log` to print the path or `session-log show` to view it.
 
 ## License
 

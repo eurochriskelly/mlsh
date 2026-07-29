@@ -3,10 +3,14 @@
 test -f "$HOME/.mlshrc-gen" && source "$HOME/.mlshrc-gen"
 source "$MLSH_TOP_DIR/scripts/mlsh.sh"
 export MLSH_INTERACTIVE=1
-export MLSH_LOG_DIR="$HOME/.mlsh/logs"
-mkdir -p "$MLSH_LOG_DIR"
-export MLSH_SESSION_LOG="$MLSH_LOG_DIR/session-$(date +%Y%m%d-%H%M%S).log"
-touch "$MLSH_SESSION_LOG"
+if [ -z "$MLSH_LOG_FILE" ]; then
+  export MLSH_LOG_FILE="$HOME/.mlsh/mlsh.log"
+  mkdir -p "$(dirname "$MLSH_LOG_FILE")"
+  if [ -f "$MLSH_LOG_FILE" ] && [ "$(wc -c < "$MLSH_LOG_FILE")" -gt 10485760 ]; then
+    : > "$MLSH_LOG_FILE"
+  fi
+  touch "$MLSH_LOG_FILE"
+fi
 
 mlsh_reset=$'\033[0m'
 mlsh_muted=$'\033[38;5;245m'
@@ -29,7 +33,7 @@ mlsh() {
 }
 
 mlsh_run() {
-  mlsh_command "$@" 2>&1 | tee -a "$MLSH_SESSION_LOG"
+  mlsh_command "$@" 2>&1 | tee -a "$MLSH_LOG_FILE"
   return "${PIPESTATUS[0]}"
 }
 
@@ -43,7 +47,7 @@ mlsh_help() {
   mlsh_command_line 'corb <args>' 'Run CoRB'
   mlsh_command_line 'modules <command>' 'Manage modules'
   mlsh_command_line 'backup <command>' 'Manage backups'
-  mlsh_command_line 'session-log [show]' 'Locate or view this session log'
+  mlsh_command_line 'session-log [show]' 'Locate or view the application log'
   mlsh_command_line 'help <command>' 'Show detailed command help'
   mlsh_command_line 'exit' 'Leave MLSH'
   printf '\n%sTip:%s ordinary shell commands such as %scd%s, %sgit%s, pipes, and redirection work too.\n' \
@@ -80,12 +84,12 @@ update() { mlsh_run update "$@"; }
 session-log() {
   if [ "$1" = "show" ]; then
     if command -v less >/dev/null 2>&1; then
-      less -R "$MLSH_SESSION_LOG"
+      less -R "$MLSH_LOG_FILE"
     else
-      cat "$MLSH_SESSION_LOG"
+      cat "$MLSH_LOG_FILE"
     fi
   else
-    echo "$MLSH_SESSION_LOG"
+    echo "$MLSH_LOG_FILE"
   fi
 }
 
@@ -103,6 +107,6 @@ printf '%s%s | |\/| | |   \___ \| |_| |%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_
 printf '%s%s |_|  |_|_|   |____/ \___/ %s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
 printf '%sMarkLogic shell%s  %sEnvironment: %s%s%s\n' \
   "$mlsh_muted" "$mlsh_reset" "$mlsh_muted" "$mlsh_cyan" "${ML_ENV:-none}" "$mlsh_reset"
-printf '%sSession log:%s %s  %s(use session-log show to view)%s\n' \
-  "$mlsh_muted" "$mlsh_reset" "$MLSH_SESSION_LOG" "$mlsh_muted" "$mlsh_reset"
+printf '%sApplication log:%s %s  %s(use session-log show to view)%s\n' \
+  "$mlsh_muted" "$mlsh_reset" "$MLSH_LOG_FILE" "$mlsh_muted" "$mlsh_reset"
 mlsh_help

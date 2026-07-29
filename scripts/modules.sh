@@ -74,15 +74,25 @@ findModules() {
     return 1
   fi
 
-  logInfo "find pattern='$pattern' normalised='$search' db='$ML_MODULES_DB' limit=$MODULE_FIND_LIMIT timeout=${MODULE_FIND_TIMEOUT}s"
+  logInfo "find pattern='$pattern' normalised='$search' target-db='$ML_MODULES_DB' eval-db='${ML_CONTENT_DB:-default}' limit=$MODULE_FIND_LIMIT timeout=${MODULE_FIND_TIMEOUT}s"
 
   local vars
-  vars=$(printf '{"pattern":"%s","limit":"%s","timeoutSeconds":"%s"}' \
-    "$(jsonEscape "$search")" "$(jsonEscape "$MODULE_FIND_LIMIT")" "$(jsonEscape "$MODULE_FIND_TIMEOUT")")
+  vars=$(printf '{"pattern":"%s","limit":"%s","timeoutSeconds":"%s","targetDatabase":"%s"}' \
+    "$(jsonEscape "$search")" "$(jsonEscape "$MODULE_FIND_LIMIT")" \
+    "$(jsonEscape "$MODULE_FIND_TIMEOUT")" "$(jsonEscape "$ML_MODULES_DB")")
 
+  # Deliberately do NOT pass $ML_MODULES_DB as the REST eval "database" field
+  # here. Doing so makes the REST /v1/eval evaluator itself set up its
+  # request context against that database before our script even runs - and
+  # if FS-modules (or whichever modules db) isn't a fully-fledged content
+  # database from the REST layer's point of view, that setup can hang
+  # indefinitely, indistinguishable from a slow query. Instead we evaluate
+  # against the normal content database and have moduleLister.xqy hop into
+  # $targetDatabase itself via xdmp:invoke-function (same technique
+  # scripts/eval.sh's modulesWrapper already uses).
   local results status
   results=$(MLSH_EVAL_QUIET=1 doEval \
-    "$MLSH_TOP_DIR/scripts/eval/moduleLister.xqy" "$ML_MODULES_DB" "$vars")
+    "$MLSH_TOP_DIR/scripts/eval/moduleLister.xqy" "$ML_CONTENT_DB" "$vars")
   status=$?
 
   if [ "$status" -ne 0 ]; then

@@ -18,6 +18,7 @@ xquery version "1.0-ml";
 declare variable $pattern as xs:string external;
 declare variable $limit as xs:string external := "200";
 declare variable $timeoutSeconds as xs:string external := "90";
+declare variable $targetDatabase as xs:string external;
 
 declare variable $max as xs:integer :=
   try { xs:integer($limit) } catch ($e) { 200 };
@@ -154,9 +155,27 @@ declare function local:main($glob as xs:string) as xs:string*
     )
 };
 
-(: Bound our own execution server-side. If the directory-scan fallback is
- : genuinely going to take forever (huge database, no lexicon), fail fast
- : with a clear XDMP-EXTIME instead of running indefinitely - this is a
- : backstop behind the client's own --max-time cutoff, not a replacement for
- : it, since the client can't tell "hung" from "just slow" without one. :)
-(xdmp:set-request-time-limit($timeLimit), local:main($pattern))
+(: We deliberately do NOT rely on the REST /v1/eval "db" form field to target
+ : $targetDatabase (FS-modules, or whichever modules database). That field
+ : makes the REST evaluator itself set up its request context against that
+ : database - and if it is a modules-only database (not a general content
+ : database), that setup can block indefinitely before this script even
+ : starts running, which looks from the client exactly like "the query is
+ : slow", with no way to tell the difference from the outside. Instead, the
+ : REST call always targets the (healthy, ordinary) content database, and we
+ : explicitly hop into $targetDatabase ourselves via xdmp:invoke-function,
+ : the same technique scripts/eval.sh's modulesWrapper already used for
+ : xdmp:eval-based scripts. We also force transaction-mode "query" so this
+ : read-only listing can never block waiting for a write lock held by some
+ : unrelated update transaction on that database. :)
+(
+  xdmp:set-request-time-limit($timeLimit),
+  xdmp:invoke-function(
+    function() { local:main($pattern) },
+    <options xmlns="xdmp:eval">
+      <database>{xdmp:database($targetDatabase)}</database>
+      <transaction-mode>query</transaction-mode>
+      <isolation>different-transaction</isolation>
+    </options>
+  )
+)

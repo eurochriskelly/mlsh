@@ -59,9 +59,14 @@ function logFilePath() {
   return path.join(process.env.HOME, '.mlsh', 'mlsh.log');
 }
 
+function sessionLogFilePath() {
+  return path.join(process.env.HOME, '.mlsh', 'mlsh-session.log');
+}
+
 function showLog(args) {
-  const logFile = logFilePath();
-  if (args[0] === 'show') {
+  const logFile = args[0] === 'transcript' ? sessionLogFilePath() : logFilePath();
+  const action = args[0] === 'transcript' ? args[1] : args[0];
+  if (action === 'show') {
     const pager = process.env.PAGER || 'less';
     const viewer = spawn(pager, ['-R', logFile], { stdio: 'inherit' });
     viewer.on('error', () => {
@@ -69,6 +74,9 @@ function showLog(args) {
       fallback.on('exit', code => process.exit(code || 0));
     });
     viewer.on('exit', code => process.exit(code || 0));
+  } else if (action === 'tail') {
+    const tail = spawn('tail', ['-f', logFile], { stdio: 'inherit' });
+    tail.on('exit', code => process.exit(code || 0));
   } else {
     console.log(logFile);
   }
@@ -111,12 +119,17 @@ function runBashScript(args) {
 
 function shellEnvironment() {
   const logDirectory = path.join(process.env.HOME, '.mlsh');
-  const logFile = path.join(logDirectory, 'mlsh.log');
+  const logFile = logFilePath();
+  const sessionLogFile = sessionLogFilePath();
   fs.mkdirSync(logDirectory, { recursive: true, mode: 0o700 });
-  if (fs.existsSync(logFile) && fs.statSync(logFile).size > 10 * 1024 * 1024) {
-    fs.truncateSync(logFile, 0);
+
+  // Rotate rather than truncate, so the run that just failed is still readable.
+  for (const file of [logFile, sessionLogFile]) {
+    if (fs.existsSync(file) && fs.statSync(file).size > 10 * 1024 * 1024) {
+      fs.renameSync(file, `${file}.1`);
+    }
+    if (!fs.existsSync(file)) fs.closeSync(fs.openSync(file, 'a', 0o600));
   }
-  if (!fs.existsSync(logFile)) fs.closeSync(fs.openSync(logFile, 'a', 0o600));
 
   const env = {
     PATH: process.env.PATH,
@@ -125,16 +138,20 @@ function shellEnvironment() {
     SHELL: process.env.SHELL,
     TERM: process.env.TERM,
     EDITOR: process.env.EDITOR,
+    TMPDIR: process.env.TMPDIR,
     MLSH_LOG_FILE: logFile,
+    MLSH_SESSION_LOG_FILE: sessionLogFile,
     MLSH_TOP_DIR // This is the key - explicitly set to repo location
   };
-  
-  // Copy over any user-specific env vars (but MLSH_TOP_DIR will override)
+
+  // Copy over any user-specific env vars (but MLSH_TOP_DIR will override).
+  // MLSH_* must pass through so MLSH_LOG_LEVEL / MLSH_DEBUG actually take effect.
   for (const key of Object.keys(process.env)) {
-    if (!env.hasOwnProperty(key) && (key.startsWith('ML_') || key.startsWith('MLCP_'))) {
+    if (!env.hasOwnProperty(key) &&
+        (key.startsWith('ML_') || key.startsWith('MLCP_') || key.startsWith('MLSH_'))) {
       env[key] = process.env[key];
     }
   }
-  
+
   return env;
 }

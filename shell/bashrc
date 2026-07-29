@@ -5,12 +5,20 @@ source "$MLSH_TOP_DIR/scripts/mlsh.sh"
 export MLSH_INTERACTIVE=1
 if [ -z "$MLSH_LOG_FILE" ]; then
   export MLSH_LOG_FILE="$HOME/.mlsh/mlsh.log"
-  mkdir -p "$(dirname "$MLSH_LOG_FILE")"
-  if [ -f "$MLSH_LOG_FILE" ] && [ "$(wc -c < "$MLSH_LOG_FILE")" -gt 10485760 ]; then
-    : > "$MLSH_LOG_FILE"
-  fi
-  touch "$MLSH_LOG_FILE"
 fi
+if [ -z "$MLSH_SESSION_LOG_FILE" ]; then
+  export MLSH_SESSION_LOG_FILE="$HOME/.mlsh/mlsh-session.log"
+fi
+mkdir -p "$(dirname "$MLSH_LOG_FILE")"
+for mlsh_f in "$MLSH_LOG_FILE" "$MLSH_SESSION_LOG_FILE"; do
+  if [ -f "$mlsh_f" ] && [ "$(wc -c <"$mlsh_f")" -gt 10485760 ]; then
+    mv -f "$mlsh_f" "${mlsh_f}.1"
+  fi
+  touch "$mlsh_f"
+done
+unset mlsh_f
+export MLSH_LOG_LEVEL="${MLSH_LOG_LEVEL:-info}"
+logInfo "session started env=${ML_ENV:-none} host=${ML_HOST:-unset}:${ML_PORT:-unset} pid=$$"
 
 mlsh_reset=$'\033[0m'
 mlsh_muted=$'\033[38;5;245m'
@@ -32,9 +40,18 @@ mlsh() {
   mlsh_run "$@"
 }
 
+# mlsh_run - Run a command, logging the invocation and its exit status to the
+# diagnostic log, and the (ANSI-stripped) terminal output to the session log.
 mlsh_run() {
-  mlsh_command "$@" 2>&1 | tee -a "$MLSH_LOG_FILE"
-  return "${PIPESTATUS[0]}"
+  logInfo "command: $*"
+  mlsh_command "$@" 2>&1 | tee >(sed $'s/\033\\[[0-9;]*[a-zA-Z]//g' >>"$MLSH_SESSION_LOG_FILE")
+  local status="${PIPESTATUS[0]}"
+  if [ "$status" -ne 0 ]; then
+    logWarn "command failed: $* (exit $status)"
+  else
+    logDebug "command ok: $*"
+  fi
+  return "$status"
 }
 
 mlsh_help() {
@@ -47,7 +64,8 @@ mlsh_help() {
   mlsh_command_line 'corb <args>' 'Run CoRB'
   mlsh_command_line 'modules <command>' 'Manage modules'
   mlsh_command_line 'backup <command>' 'Manage backups'
-  mlsh_command_line 'session-log [show]' 'Locate or view the application log'
+  mlsh_command_line 'session-log [show]' 'Locate or view the diagnostic log'
+  mlsh_command_line 'debug [on|off]' 'Set diagnostic log verbosity'
   mlsh_command_line 'help <command>' 'Show detailed command help'
   mlsh_command_line 'exit' 'Leave MLSH'
   printf '\n%sTip:%s ordinary shell commands such as %scd%s, %sgit%s, pipes, and redirection work too.\n' \
@@ -82,15 +100,57 @@ module() { mlsh_run module "$@"; }
 backup() { mlsh_run backup "$@"; }
 update() { mlsh_run update "$@"; }
 session-log() {
-  if [ "$1" = "show" ]; then
-    if command -v less >/dev/null 2>&1; then
-      less -R "$MLSH_LOG_FILE"
-    else
-      cat "$MLSH_LOG_FILE"
-    fi
-  else
-    echo "$MLSH_LOG_FILE"
+  local target="$MLSH_LOG_FILE"
+  local action="$1"
+  if [ "$1" = "transcript" ]; then
+    target="$MLSH_SESSION_LOG_FILE"
+    shift
+    action="$1"
   fi
+  case "$action" in
+  show)
+    if command -v less >/dev/null 2>&1; then
+      less -R "$target"
+    else
+      cat "$target"
+    fi
+    ;;
+  tail)
+    tail -f "$target"
+    ;;
+  clear)
+    : >"$target"
+    echo "Cleared $target"
+    ;;
+  *)
+    echo "$target"
+    ;;
+  esac
+}
+
+# debug - Show or set the diagnostic log verbosity.
+debug() {
+  case "$1" in
+  "")
+    echo "Log level: $MLSH_LOG_LEVEL  (log: $MLSH_LOG_FILE)"
+    ;;
+  on)
+    export MLSH_LOG_LEVEL=debug
+    echo "Log level: debug"
+    ;;
+  off)
+    export MLSH_LOG_LEVEL=info
+    echo "Log level: info"
+    ;;
+  trace | debug | info | warn | error | off)
+    export MLSH_LOG_LEVEL="$1"
+    echo "Log level: $1"
+    ;;
+  *)
+    echo "Usage: debug [on|off|trace|debug|info|warn|error]"
+    return 1
+    ;;
+  esac
 }
 
 alias h=help
@@ -107,6 +167,6 @@ printf '%s%s | |\/| | |   \___ \| |_| |%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_
 printf '%s%s |_|  |_|_|   |____/ \___/ %s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
 printf '%sMarkLogic shell%s  %sEnvironment: %s%s%s\n' \
   "$mlsh_muted" "$mlsh_reset" "$mlsh_muted" "$mlsh_cyan" "${ML_ENV:-none}" "$mlsh_reset"
-printf '%sApplication log:%s %s  %s(use session-log show to view)%s\n' \
+printf '%sDiagnostic log:%s %s  %s(session-log show | session-log tail | debug on)%s\n' \
   "$mlsh_muted" "$mlsh_reset" "$MLSH_LOG_FILE" "$mlsh_muted" "$mlsh_reset"
 mlsh_help

@@ -82,10 +82,12 @@ mlsh_command() {
     showHelp
     ;;
   esac
+  local status=$?
 
   if [ "$MLSH_INTERACTIVE" != "1" ]; then
     printf '\033[2m----------------------------------------\033[0m\n'
   fi
+  return $status
 }
 
 showHelp() {
@@ -259,5 +261,11 @@ mlshUpdate() {
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  logInfo "command: $*"
   mlsh_command "$@"
+  mlsh_status=$?
+  if [ "$mlsh_status" -ne 0 ]; then
+    logWarn "command failed: $* (exit $mlsh_status)"
+  fi
+  exit "$mlsh_status"
 fi

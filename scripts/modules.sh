@@ -1,12 +1,17 @@
 #!/bin/bash
 
+source "$MLSH_TOP_DIR/scripts/common.sh"
+export MLSH_LOG_SCOPE=modules
+
 TODAY=$(date +%Y%m%d)
+MODULE_FIND_LIMIT=${MLSH_MODULE_FIND_LIMIT:-200}
 
 main() {
   local option=$1
   case $option in
   find|retrieve|match|search)
-    findModules "$2"
+    shift
+    findModules "$@"
     ;;
   load|update)
     loadModules
@@ -26,25 +31,93 @@ main() {
   esac
 }
 
+# jsonEscape - Escape a value for embedding in a JSON string literal.
+jsonEscape() {
+  local value=$1
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '%s' "$value"
+}
+
+# normalisePattern - Make bare terms behave the way people expect.
+# 'trans' becomes '*trans*'; anything already containing a wildcard is left be.
+normalisePattern() {
+  local pattern=$1
+  case "$pattern" in
+  *'*'* | *'?'*) printf '%s' "$pattern" ;;
+  *) printf '*%s*' "$pattern" ;;
+  esac
+}
+
 findModules() {
   local pattern=$1
   local directory="modules_${TODAY}"
+
   if [ -z "$pattern" ]; then
     read -r -p "Pattern to match (for example, *foo.xqy): " pattern
   fi
-  local results
-  results=$(MLSH_EVAL_QUIET=1 doEval "$MLSH_TOP_DIR/scripts/eval/moduleLister.xqy" "$ML_MODULES_DB" "{\"pattern\":\"${pattern}\"}") || {
+  if [ -z "$pattern" ]; then
+    echo "No pattern given."
+    return 1
+  fi
+
+  local search
+  search=$(normalisePattern "$pattern")
+
+  if [ -z "$ML_MODULES_DB" ]; then
+    logError "ML_MODULES_DB is not set for env ${ML_ENV:-none}"
+    echo "No modules database configured. Run 'mlsh env' and set the modules database."
+    return 1
+  fi
+
+  logInfo "find pattern='$pattern' normalised='$search' db='$ML_MODULES_DB' limit=$MODULE_FIND_LIMIT"
+
+  local vars
+  vars=$(printf '{"pattern":"%s","limit":"%s"}' \
+    "$(jsonEscape "$search")" "$(jsonEscape "$MODULE_FIND_LIMIT")")
+
+  local results status
+  results=$(MLSH_EVAL_QUIET=1 doEval \
+    "$MLSH_TOP_DIR/scripts/eval/moduleLister.xqy" "$ML_MODULES_DB" "$vars")
+  status=$?
+
+  if [ "$status" -ne 0 ]; then
     printf '%s\n' "$results"
     return 1
-  }
-  local matches=()
-  while IFS= read -r line; do
-    [ -n "$line" ] && [[ "$line" == *"~"* ]] && matches+=("$line")
-  done <<< "$results"
-  if [ "${#matches[@]}" -eq 0 ]; then
-    echo "No modules match '$pattern' in $ML_MODULES_DB."
-    return
   fi
+
+  # The multipart response uses CRLF; strip the CRs before any line matching.
+  results=${results//$'\r'/}
+
+  # The server reports how it searched and why a result set may be empty.
+  local diagnostics
+  diagnostics=$(printf '%s\n' "$results" | grep '^MLSH-DIAG:' | sed 's/^MLSH-DIAG://')
+  if [ -n "$diagnostics" ]; then
+    while IFS= read -r diag; do
+      logInfo "server: $diag"
+    done <<<"$diagnostics"
+  fi
+
+  local matches=()
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+    MLSH-DIAG:*) continue ;;
+    *'~'*'~'*'~EOL') matches+=("$line") ;;
+    esac
+  done <<<"$results"
+
+  if [ "${#matches[@]}" -eq 0 ]; then
+    echo "No modules match '$search' in $ML_MODULES_DB."
+    if [ -n "$diagnostics" ]; then
+      echo "Server diagnostics:"
+      printf '%s\n' "$diagnostics" | sed 's/^/  /'
+    fi
+    echo "Details in $MLSH_LOG_FILE (run 'debug on' for the full request/response)."
+    return 0
+  fi
+
+  logInfo "find matched ${#matches[@]} module(s)"
   echo "Matching modules:"
   local index=1
   for line in "${matches[@]}"; do
@@ -62,6 +135,7 @@ findModules() {
       local uri=${line%%~*}
       local local_name=${line#*~}
       local_name=${local_name%%~*}
+      logInfo "downloading $uri -> $directory/originals/$local_name"
       fetch "/v1/documents?uri=${uri}&database=${ML_MODULES_DB}" -X GET > "$directory/originals/$local_name" || return
       printf '%s\n' "$line" >> "$directory/module-info.txt"
       cp "$directory/originals/$local_name" "$directory/edited/$local_name"
@@ -82,9 +156,20 @@ loadModules() {
     local source_file="$directory/edited/$local_name"
     [ "$mode" = "reset" ] && source_file="$directory/originals/$local_name"
     [ -f "$source_file" ] || continue
-    local url="${ML_PROTOCOL}://${ML_HOST}:${ML_PORT}/v1/documents?uri=${uri}&database=${ML_MODULES_DB}"
-    curl --silent --show-error --digest -u "$ML_USER:$ML_PASS" -X PUT -T "$source_file" "$url"
-    echo "Loaded $uri"
+    local url="${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}/v1/documents?uri=${uri}&database=${ML_MODULES_DB}"
+    local body_file
+    body_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-load.XXXXXX")
+    local http_code
+    http_code=$(mlshCurl "load $uri" "$body_file" \
+      --silent --show-error --digest -u "$ML_USER:$ML_PASS" -X PUT -T "$source_file" "$url")
+    local rc=$?
+    if [ "$rc" -ne 0 ] || [ "${http_code#2}" = "$http_code" ]; then
+      echo "FAILED to load $uri (HTTP ${http_code:-transport-error})"
+      sed 's/^/  /' "$body_file"
+    else
+      echo "Loaded $uri"
+    fi
+    rm -f "$body_file"
   done < "$directory/module-info.txt"
 }
 

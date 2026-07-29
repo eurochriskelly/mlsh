@@ -265,18 +265,23 @@ esac
 
 ## Interactive Shell
 
-Running `mlsh` without arguments drops you into a custom shell with:
+Running `mlsh` without arguments clears the terminal and opens an interactive
+shell. The prompt includes the active environment:
 
-- Custom prompt showing current environment and time
-- Session logging to `/tmp/mlsh-<session>.log`
-- Color-coded output helpers (yy, gg, rr, bb, etc.)
-- Convenient single-letter aliases
+```text
+mlsh [dev]>
+```
+
+Run MLSH commands directly inside the shell, without the `mlsh` prefix. Normal
+shell commands, pipes, redirection, and history remain available.
 
 ```bash
 $ mlsh
-# Entering mlsh interactive shell
-# Use 'h' or 'helpme' to see available commands
-# Use 'ce' to change environment
+mlsh [dev]> eval script.xqy Documents
+mlsh [dev]> logs show-errors --time 10m
+mlsh [dev]> env
+mlsh [dev]> git status
+mlsh [dev]> exit
 ```
 
 ## License

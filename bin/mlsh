@@ -45,20 +45,50 @@ process.env.MLSH_TOP_DIR = MLSH_TOP_DIR;
 // Get command and arguments
 const [, , ...args] = process.argv;
 
-// If no arguments, show help
+// Start the interactive MLSH shell when no command is supplied.
 if (args.length === 0) {
-  runBashScript(['help']);
+  runInteractiveShell();
 } else {
   // Otherwise, run the bash mlsh.sh script
   runBashScript(args);
+}
+
+function runInteractiveShell() {
+  const bash = spawn('bash', ['--noprofile', '--rcfile', path.join(MLSH_TOP_DIR, 'shell/bashrc'), '-i'], {
+    stdio: 'inherit',
+    env: shellEnvironment()
+  });
+
+  bash.on('error', (err) => {
+    console.error('Error starting mlsh shell:', err.message);
+    process.exit(1);
+  });
+
+  bash.on('exit', (code) => {
+    process.exit(code || 0);
+  });
 }
 
 /**
  * Run a bash script with arguments
  */
 function runBashScript(args) {
-  // Create environment with MLSH_TOP_DIR override
-  // Use 'env -i' to start with a clean environment, then add back necessary vars
+  const bash = spawn('bash', [path.join(MLSH_TOP_DIR, 'scripts/mlsh.sh'), ...args], {
+    stdio: 'inherit',
+    env: shellEnvironment()
+  });
+
+  bash.on('error', (err) => {
+    console.error('Error running mlsh:', err.message);
+    process.exit(1);
+  });
+
+  bash.on('exit', (code) => {
+    process.exit(code || 0);
+  });
+}
+
+function shellEnvironment() {
   const env = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
@@ -76,18 +106,5 @@ function runBashScript(args) {
     }
   }
   
-  const bash = spawn('bash', [path.join(MLSH_TOP_DIR, 'scripts/mlsh.sh'), ...args], {
-    stdio: 'inherit',
-    env
-  });
-
-  bash.on('error', (err) => {
-    console.error('Error running mlsh:', err.message);
-    process.exit(1);
-  });
-
-  bash.on('exit', (code) => {
-    process.exit(code || 0);
-  });
+  return env;
 }
-

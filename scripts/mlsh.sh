@@ -4,7 +4,7 @@ if [ -f "$MLSH_TOP_DIR/scripts/common.sh" ]; then
   source $MLSH_TOP_DIR/scripts/common.sh
 fi
 test -f $HOME/.mlshrc-gen && source $HOME/.mlshrc-gen
-mlsh() {
+mlsh_command() {
   local cmd=$1
   shift
   local args=($@)
@@ -74,22 +74,17 @@ mlsh() {
     bash $MLSH_TOP_DIR/scripts/corb-wrapper.sh "${args[@]}"
     ;;
 
+  "")
+    showHelp
+    ;;
+
   *)
-    dropToShell
+    echo "Unknown command: $cmd"
+    showHelp
     ;;
   esac
 
   echo -e "${bM}+${end}"
-}
-
-dropToShell() {
-  CUSTOM_BASHRC="$HOME/.mlsh.d/mlsh/shell/bashrc"
-  # Starting bash with the custom bashrc
-  if [ -f "$CUSTOM_BASHRC" ]; then
-    exec /bin/bash --rcfile "$CUSTOM_BASHRC" --noprofile
-  else
-    echo "No custom bashrc found [$CUSTOM_BASHRC]. Starting default shell."
-  fi
 }
 
 showHelp() {
@@ -262,4 +257,6 @@ mlshUpdate() {
   cd $OLD_DIR 2>&1 >/dev/null
 }
 
-mlsh $@
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  mlsh_command "$@"
+fi

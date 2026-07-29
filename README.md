@@ -134,9 +134,12 @@ mlsh modules find transform
 mlsh modules load
 mlsh modules loadOne
 mlsh modules reset
+mlsh modules load --workspace modules_20260729
 ```
 
 A bare search term is treated as a contains-style glob. For example, `transform` becomes `*transform*`.
+Load, reset, and clone use today's module workspace when available, otherwise
+the newest `modules_*` directory containing `module-info.txt`.
 
 ### Run MLCP and CoRB
 

@@ -41,11 +41,69 @@ async function mapLimit(items, limit, operation) {
   return results;
 }
 
-function moduleDirectory() {
-  return path.resolve(`modules_${today()}`);
+function datedModuleDirectory(cwd = process.cwd()) {
+  return path.resolve(cwd, `modules_${today()}`);
 }
 
-async function findModules(context, suppliedPattern) {
+function hasModuleList(directory) {
+  return fs.existsSync(path.join(directory, 'module-info.txt'));
+}
+
+export function resolveModuleWorkspace({ cwd = process.cwd(), requested, date = today() } = {}) {
+  const currentDirectory = path.resolve(cwd);
+  if (requested) {
+    const directory = path.resolve(currentDirectory, requested);
+    if (!hasModuleList(directory)) {
+      throw new Error([
+        `Module workspace is missing its module list: ${directory}`,
+        `Expected: ${path.join(directory, 'module-info.txt')}`,
+        "Choose a workspace created by 'modules find'."
+      ].join('\n'));
+    }
+    return { directory, reason: 'requested' };
+  }
+
+  if (/^modules_/.test(path.basename(currentDirectory)) && hasModuleList(currentDirectory)) {
+    return { directory: currentDirectory, reason: 'current-directory' };
+  }
+
+  const expected = path.join(currentDirectory, `modules_${date}`);
+  if (hasModuleList(expected)) return { directory: expected, reason: 'today' };
+
+  const discovered = fs.readdirSync(currentDirectory, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && /^modules_/.test(entry.name))
+    .map(entry => path.join(currentDirectory, entry.name));
+  const candidates = discovered
+    .filter(hasModuleList)
+    .map(directory => ({ directory, modified: fs.statSync(path.join(directory, 'module-info.txt')).mtimeMs }))
+    .sort((left, right) => right.modified - left.modified || right.directory.localeCompare(left.directory));
+  if (candidates.length) return { directory: candidates[0].directory, reason: 'latest', candidates: candidates.map(candidate => candidate.directory) };
+
+  const details = [
+    `No module workspace found in ${currentDirectory}.`,
+    `Expected: ${path.join(expected, 'module-info.txt')}`
+  ];
+  if (discovered.length) {
+    details.push('Found directories without module-info.txt:');
+    details.push(...discovered.map(directory => `  ${directory}`));
+  }
+  details.push("Run 'modules find <pattern>' first, or use 'modules load --workspace <directory>'.");
+  throw new Error(details.join('\n'));
+}
+
+function parseModuleArgs(args) {
+  const positional = [];
+  let workspace;
+  for (let index = 0; index < args.length; index++) {
+    if (['-w', '--workspace', '--directory'].includes(args[index])) {
+      if (!args[index + 1]) throw new Error(`${args[index]} requires a directory.`);
+      workspace = args[++index];
+    } else positional.push(args[index]);
+  }
+  return { positional, workspace };
+}
+
+async function findModules(context, suppliedPattern, requestedWorkspace) {
   const pattern = suppliedPattern || await ask('Pattern to match (for example, *foo.xqy): ');
   if (!pattern) throw new Error('No pattern given.');
   const search = normalisePattern(pattern);
@@ -84,7 +142,7 @@ async function findModules(context, suppliedPattern) {
   const selected = selectedItems(records, choice);
   if (!selected.length) throw new Error('No valid module numbers selected.');
 
-  const directory = moduleDirectory();
+  const directory = requestedWorkspace ? path.resolve(requestedWorkspace) : datedModuleDirectory();
   fs.mkdirSync(path.join(directory, 'originals'), { recursive: true });
   fs.mkdirSync(path.join(directory, 'edited'), { recursive: true });
   const results = await mapLimit(selected, concurrency, async record => {
@@ -108,12 +166,19 @@ async function findModules(context, suppliedPattern) {
 
 function readModuleEntries(directory) {
   const info = path.join(directory, 'module-info.txt');
-  if (!fs.existsSync(info)) throw new Error("No module list found. Run 'mlsh modules find' first.");
   return fs.readFileSync(info, 'utf8').split(/\r?\n/).filter(Boolean).map(parseModuleRecord);
 }
 
-async function loadModules(context, mode = '') {
-  const directory = moduleDirectory();
+async function loadModules(context, mode = '', requestedWorkspace) {
+  const workspace = resolveModuleWorkspace({ requested: requestedWorkspace });
+  const directory = workspace.directory;
+  if (workspace.reason === 'latest') {
+    console.log(`Using latest module workspace: ${path.relative(process.cwd(), directory) || directory}`);
+    if (workspace.candidates.length > 1) console.log(`Other workspaces are available; select one with --workspace <directory>.`);
+  } else if (workspace.reason === 'requested' || workspace.reason === 'current-directory') {
+    console.log(`Using module workspace: ${path.relative(process.cwd(), directory) || '.'}`);
+  }
+  context.logger.info(`module workspace=${directory} selection=${workspace.reason} cwd=${process.cwd()}`);
   let records = readModuleEntries(directory);
   if (!records.length) throw new Error(`No modules found in ${path.join(directory, 'module-info.txt')}.`);
   if (mode === 'one') {
@@ -128,25 +193,35 @@ async function loadModules(context, mode = '') {
   }
 
   const concurrency = positiveInteger(process.env.MLSH_MODULE_CONCURRENCY, 4);
+  const sourceDirectory = mode === 'reset' ? 'originals' : 'edited';
+  console.log(`Loading ${records.length} module${records.length === 1 ? '' : 's'} from ${path.join(path.basename(directory), sourceDirectory)}`);
+  console.log(`Target: ${context.environment.protocol}://${context.environment.host}:${context.environment.port} database=${context.environment.modules_db}`);
   const results = await mapLimit(records, concurrency, async record => {
-    const source = path.join(directory, mode === 'reset' ? 'originals' : 'edited', record.localName);
+    const source = path.join(directory, sourceDirectory, record.localName);
     if (!fs.existsSync(source)) {
       console.log(`Skipping ${record.uri}: ${source} not found.`);
       return { ok: true, skipped: true };
     }
     const endpoint = `/v1/documents?uri=${encodeURIComponent(record.uri)}&database=${encodeURIComponent(context.environment.modules_db)}`;
     const response = await context.client.request(endpoint, ['-X', 'PUT', '-T', source]);
-    if (!response.ok) throw new Error(`HTTP ${response.status || 'transport-error'} ${response.body.toString()}`.trim());
+    if (!response.ok) {
+      const detail = response.body.toString().replace(/\s+/g, ' ').trim().slice(0, 500);
+      throw new Error(`HTTP ${response.status || 'transport-error'}${detail ? ` — ${detail}` : ''}`);
+    }
     console.log(`Loaded ${record.uri}`);
     return { ok: true };
   });
   const failures = results.map((result, index) => ({ result, record: records[index] })).filter(({ result }) => !result?.ok);
-  if (failures.length) console.error(`Some modules failed to load:\n${failures.map(({ record, result }) => `  ${record.uri}: ${result?.error?.message || 'unknown error'}`).join('\n')}`);
+  const skipped = results.filter(result => result?.skipped).length;
+  const loaded = results.length - failures.length - skipped;
+  if (failures.length) console.error(`Some modules failed to load:\n${failures.map(({ record, result }) => `  ${record.uri}\n    ${result?.error?.message || 'unknown error'}`).join('\n')}`);
+  console.log(`Module load complete: ${loaded} loaded, ${skipped} skipped, ${failures.length} failed.`);
+  if (failures.length) console.log(`Full request and response details: ${context.logFile}`);
   return failures.length ? 1 : 0;
 }
 
-async function cloneModule() {
-  const directory = moduleDirectory();
+async function cloneModule(requestedWorkspace) {
+  const { directory } = resolveModuleWorkspace({ requested: requestedWorkspace });
   readModuleEntries(directory);
   const source = await ask('Module file name to clone: ');
   const target = await ask('New module file name: ');
@@ -159,13 +234,15 @@ async function cloneModule() {
 }
 
 export async function runModules(context, args) {
-  const command = args[0];
+  const { positional, workspace } = parseModuleArgs(args);
+  const command = positional[0];
   if (['-h', '--help'].includes(command) || !command) return showHelp('modules');
-  if (['find', 'retrieve', 'match', 'search'].includes(command)) return findModules(context, args[1]);
-  if (['load', 'update'].includes(command)) return loadModules(context);
-  if (['loadOne', 'load-one'].includes(command)) return loadModules(context, 'one');
-  if (command === 'reset') return loadModules(context, 'reset');
-  if (command === 'clone') return cloneModule();
+  if (['find', 'retrieve', 'match', 'search'].includes(command)) return findModules(context, positional[1], workspace);
+  const selectedWorkspace = workspace || positional[1];
+  if (['load', 'update'].includes(command)) return loadModules(context, '', selectedWorkspace);
+  if (['loadOne', 'load-one'].includes(command)) return loadModules(context, 'one', selectedWorkspace);
+  if (command === 'reset') return loadModules(context, 'reset', selectedWorkspace);
+  if (command === 'clone') return cloneModule(selectedWorkspace);
   throw new Error(`Unknown modules command: ${command}`);
 }
 

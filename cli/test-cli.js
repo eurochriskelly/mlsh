@@ -7,7 +7,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { parseEvalArgs, pairsToJson, resolveScript } from './commands/eval.js';
 import { mlcpConnectionArgs } from './commands/external.js';
-import { normalisePattern, parseModuleRecord } from './commands/modules.js';
+import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
 import { createContext } from './main.js';
 import {
   activateEnvironment,
@@ -120,6 +120,70 @@ try {
       permissions: 'read',
       collections: 'apps'
     });
+  });
+
+  test('reuses the newest valid module workspace when today has none', () => {
+    const workspaceRoot = path.join(home, 'module-workspaces');
+    const older = path.join(workspaceRoot, 'modules_20260728');
+    const newer = path.join(workspaceRoot, 'modules_20260729');
+    fs.mkdirSync(older, { recursive: true });
+    fs.mkdirSync(newer, { recursive: true });
+    fs.writeFileSync(path.join(older, 'module-info.txt'), '/old.xqy~old.xqy~~~EOL\n');
+    fs.writeFileSync(path.join(newer, 'module-info.txt'), '/new.xqy~new.xqy~~~EOL\n');
+    fs.utimesSync(path.join(older, 'module-info.txt'), new Date(1000), new Date(1000));
+    fs.utimesSync(path.join(newer, 'module-info.txt'), new Date(2000), new Date(2000));
+
+    const selected = resolveModuleWorkspace({ cwd: workspaceRoot, date: '20990101' });
+    assert.equal(selected.directory, newer);
+    assert.equal(selected.reason, 'latest');
+    assert.equal(resolveModuleWorkspace({ cwd: workspaceRoot, requested: 'modules_20260728' }).directory, older);
+    assert.equal(resolveModuleWorkspace({ cwd: newer }).reason, 'current-directory');
+  });
+
+  test('reports where module workspaces were searched without logging a stack at debug level', () => {
+    const emptyWorkspace = path.join(home, 'empty-module-workspace');
+    fs.mkdirSync(emptyWorkspace);
+    const result = spawnSync(process.execPath, [path.resolve('bin/mlsh'), 'modules', 'load'], {
+      cwd: emptyWorkspace,
+      env: { ...process.env, HOME: home, MLSH_INTERACTIVE: '1', MLSH_LOG_LEVEL: 'debug' },
+      encoding: 'utf8'
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, new RegExp(`No module workspace found in ${fs.realpathSync(emptyWorkspace).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(result.stderr, /modules load --workspace <directory>/);
+    const diagnosticLog = fs.readFileSync(path.join(home, '.mlsh', 'mlsh.log'), 'utf8');
+    assert.doesNotMatch(diagnosticLog, /at resolveModuleWorkspace/);
+  });
+
+  test('loads from a previous-day module workspace through the Node command', () => {
+    const root = path.join(home, 'previous-day-load');
+    const workspace = path.join(root, 'modules_20260729');
+    const edited = path.join(workspace, 'edited');
+    const fakeBin = path.join(root, 'bin');
+    fs.mkdirSync(edited, { recursive: true });
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(path.join(workspace, 'module-info.txt'), '/old.xqy~old.xqy~~~EOL\n');
+    fs.writeFileSync(path.join(edited, 'old.xqy'), 'xquery version "1.0-ml"; 1');
+    const curl = path.join(fakeBin, 'curl');
+    fs.writeFileSync(curl, `#!/bin/sh
+output=
+previous=
+for argument in "$@"; do
+  if [ "$previous" = "-o" ]; then output="$argument"; fi
+  previous="$argument"
+done
+: > "$output"
+printf '200'
+`);
+    fs.chmodSync(curl, 0o755);
+    const result = spawnSync(process.execPath, [path.resolve('bin/mlsh'), 'modules', 'load'], {
+      cwd: root,
+      env: { ...process.env, HOME: home, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, MLSH_INTERACTIVE: '1' },
+      encoding: 'utf8'
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Using latest module workspace: modules_20260729/);
+    assert.match(result.stdout, /Module load complete: 1 loaded, 0 skipped, 0 failed/);
   });
 
   test('uses MLCP copy-specific connection arguments', () => {

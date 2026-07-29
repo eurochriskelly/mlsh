@@ -8,9 +8,12 @@ Options:
   -d, --database <name>    Target database (defaults to ML_CONTENT_DB)
   -p, --params <value>     Value for the REST API vars parameter
   -v, --vars <pairs>       Convert key=value pairs to JSON`,
-  modules: `Usage: mlsh modules {find <pattern>|load|loadOne|clone|reset}
+  modules: `Usage: mlsh modules {find <pattern>|load|loadOne|clone|reset} [--workspace <directory>]
 
-Download modules for local editing and load them back into MarkLogic.`,
+Download modules for local editing and load them back into MarkLogic.
+
+Load, reset, and clone reuse today's workspace or the newest valid modules_*
+workspace. Use --workspace to select one explicitly.`,
   logs: `Usage: mlsh logs {show-errors|show-access|search|follow} [options]
 
 Read or follow MarkLogic server logs.`,

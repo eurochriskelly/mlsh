@@ -81,7 +81,8 @@ export async function runCli(args, options = {}) {
         status = 1;
     }
   } catch (error) {
-    context.logger.error(`command failed: ${command} (${error.stack || error.message})`);
+    context.logger.error(`command failed: ${command}: ${error.message}`);
+    if (error.stack) context.logger.trace(`command stack: ${error.stack}`);
     console.error(`mlsh ${command}: ${error.message}`);
     status = 1;
   }

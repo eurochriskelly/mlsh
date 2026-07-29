@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Direct environment selection with `mlsh env <name>`, plus `mlsh env list` and `mlsh env current`.
 - Tests for the installed command route, shell-safe environment generation, password redaction, MLCP copy arguments, and live environment switching inside the interactive shell.
+- Module workspace discovery that survives date changes, with explicit `--workspace` selection and clearer load summaries.
 
 ### Removed
 

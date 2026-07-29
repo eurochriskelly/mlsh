@@ -9,6 +9,10 @@ MODULE_FIND_LIMIT=${MLSH_MODULE_FIND_LIMIT:-200}
 # (MLSH_CURL_TIMEOUT, default 120s in common.sh) so we get MarkLogic's own
 # XDMP-EXTIME error instead of the client cutting the connection first.
 MODULE_FIND_TIMEOUT=${MLSH_MODULE_FIND_TIMEOUT:-90}
+# How many module downloads/uploads to run concurrently. Each file is an
+# independent HTTP request, so batching them in parallel turns an N-file
+# operation from N sequential round-trips into ceil(N/concurrency).
+MODULE_CONCURRENCY=${MLSH_MODULE_CONCURRENCY:-4}
 
 main() {
   local option=$1
@@ -143,20 +147,61 @@ findModules() {
   mkdir -p "$directory/originals" "$directory/edited"
   if [ "$choices" = "ALL" ]; then choices=$(seq -s, 1 $((index - 1))); fi
   local selected=" ${choices//,/ } "
+
+  # Collect the lines to download first, then fetch them $MODULE_CONCURRENCY
+  # at a time in the background, instead of one full request-response
+  # round-trip after another.
+  local to_download=()
   index=1
   for line in "${matches[@]}"; do
-    if [[ "$selected" == *" $index "* ]]; then
-      local uri=${line%%~*}
-      local local_name=${line#*~}
-      local_name=${local_name%%~*}
-      logInfo "downloading $uri -> $directory/originals/$local_name"
-      fetch "/v1/documents?uri=${uri}&database=${ML_MODULES_DB}" -X GET > "$directory/originals/$local_name" || return
-      printf '%s\n' "$line" >> "$directory/module-info.txt"
-      cp "$directory/originals/$local_name" "$directory/edited/$local_name"
-    fi
+    [[ "$selected" == *" $index "* ]] && to_download+=("$line")
     index=$((index + 1))
   done
+
+  local failures_file
+  failures_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-dl-failures.XXXXXX")
+
+  local total=${#to_download[@]}
+  local i=0
+  while [ "$i" -lt "$total" ]; do
+    local batch_end=$((i + MODULE_CONCURRENCY))
+    [ "$batch_end" -gt "$total" ] && batch_end=$total
+    local j
+    for ((j = i; j < batch_end; j++)); do
+      downloadOneModule "$directory" "$failures_file" "${to_download[j]}" &
+    done
+    wait
+    i=$batch_end
+  done
+
+  if [ -s "$failures_file" ]; then
+    echo "Some modules failed to download:"
+    sed 's/^/  /' "$failures_file"
+  fi
+  rm -f "$failures_file"
+
   echo "Edit files in $directory/edited, then run: mlsh modules load"
+}
+
+# downloadOneModule - Fetch one module and record it in module-info.txt.
+# Designed to be run standalone in a background job (see the batch loop in
+# findModules), so any failure is recorded to $failures_file rather than
+# aborting sibling jobs already in flight.
+downloadOneModule() {
+  local directory=$1 failures_file=$2 line=$3
+  local uri=${line%%~*}
+  local local_name=${line#*~}
+  local_name=${local_name%%~*}
+
+  logInfo "downloading $uri -> $directory/originals/$local_name"
+  if ! fetch "/v1/documents?uri=${uri}&database=${ML_MODULES_DB}" -X GET >"$directory/originals/$local_name"; then
+    echo "$uri" >>"$failures_file"
+    echo "FAILED to download $uri"
+    return 1
+  fi
+  printf '%s\n' "$line" >>"$directory/module-info.txt"
+  cp "$directory/originals/$local_name" "$directory/edited/$local_name"
+  echo "Downloaded $uri"
 }
 
 loadModules() {
@@ -197,35 +242,71 @@ loadModules() {
   fi
 
   local index=1
+  local to_load=()
   for line in "${entries[@]}"; do
     if [ "$mode" = "one" ] && [[ "$selected_indices" != *" $index "* ]]; then
       index=$((index + 1))
       continue
     fi
     index=$((index + 1))
-
-    local uri local_name permissions collections
-    IFS='~' read -r uri local_name permissions collections <<<"$line"
-
-    local source_file="$directory/edited/$local_name"
-    [ "$mode" = "reset" ] && source_file="$directory/originals/$local_name"
-    [ -f "$source_file" ] || { echo "Skipping $uri: $source_file not found."; continue; }
-
-    local url="${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}/v1/documents?uri=${uri}&database=${ML_MODULES_DB}"
-    local body_file
-    body_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-load.XXXXXX")
-    local http_code
-    http_code=$(mlshCurl "load $uri" "$body_file" \
-      --silent --show-error --digest -u "$ML_USER:$ML_PASS" -X PUT -T "$source_file" "$url")
-    local rc=$?
-    if [ "$rc" -ne 0 ] || [ "${http_code#2}" = "$http_code" ]; then
-      echo "FAILED to load $uri (HTTP ${http_code:-transport-error})"
-      sed 's/^/  /' "$body_file"
-    else
-      echo "Loaded $uri"
-    fi
-    rm -f "$body_file"
+    to_load+=("$line")
   done
+
+  local failures_file
+  failures_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-load-failures.XXXXXX")
+
+  local total=${#to_load[@]}
+  local i=0
+  while [ "$i" -lt "$total" ]; do
+    local batch_end=$((i + MODULE_CONCURRENCY))
+    [ "$batch_end" -gt "$total" ] && batch_end=$total
+    local j
+    for ((j = i; j < batch_end; j++)); do
+      loadOneModuleFile "$directory" "$mode" "$failures_file" "${to_load[j]}" &
+    done
+    wait
+    i=$batch_end
+  done
+
+  if [ -s "$failures_file" ]; then
+    echo "Some modules failed to load:"
+    sed 's/^/  /' "$failures_file"
+  fi
+  rm -f "$failures_file"
+}
+
+# loadOneModuleFile - PUT one edited (or original, in reset mode) module file
+# back to MarkLogic. Designed to run standalone in a background job (see the
+# batch loop in loadModules), so a failure is recorded to $failures_file
+# rather than aborting sibling jobs already in flight.
+loadOneModuleFile() {
+  local directory=$1 mode=$2 failures_file=$3 line=$4
+
+  local uri local_name permissions collections
+  IFS='~' read -r uri local_name permissions collections <<<"$line"
+
+  local source_file="$directory/edited/$local_name"
+  [ "$mode" = "reset" ] && source_file="$directory/originals/$local_name"
+  if [ ! -f "$source_file" ]; then
+    echo "Skipping $uri: $source_file not found."
+    return 0
+  fi
+
+  local url="${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}/v1/documents?uri=${uri}&database=${ML_MODULES_DB}"
+  local body_file
+  body_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-load.XXXXXX")
+  local http_code
+  http_code=$(mlshCurl "load $uri" "$body_file" \
+    --silent --show-error --digest -u "$ML_USER:$ML_PASS" -X PUT -T "$source_file" "$url")
+  local rc=$?
+  if [ "$rc" -ne 0 ] || [ "${http_code#2}" = "$http_code" ]; then
+    echo "$uri" >>"$failures_file"
+    echo "FAILED to load $uri (HTTP ${http_code:-transport-error})"
+    sed 's/^/  /' "$body_file"
+  else
+    echo "Loaded $uri"
+  fi
+  rm -f "$body_file"
 }
 
 cloneModule() {

@@ -138,25 +138,43 @@ mlshCurl() {
   local status_file
   status_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-status.XXXXXX")
 
-  # Run in the background so we can log heartbeats while curl blocks. The
+  # Run curl in the background so we can heartbeat-log while it blocks. The
   # http status code is written to status_file (via -w) since we can't use
   # command substitution on a backgrounded process.
   curl --max-time "$timeout" "$@" -o "$body_file" -w '%{http_code}' \
     >"$status_file" 2>>"$MLSH_LOG_FILE" &
-  local pid=$!
+  local curl_pid=$!
 
-  local waited=0
-  while kill -0 "$pid" 2>/dev/null; do
-    sleep "$heartbeat"
-    kill -0 "$pid" 2>/dev/null || break
-    waited=$((waited + heartbeat))
-    logWarn "$label still waiting after ${waited}s (server has not responded yet; will give up at ${timeout}s)"
-  done
+  # The heartbeat ticker runs as a fully independent background job, NOT a
+  # loop we poll from the main flow. Critically: we `wait "$curl_pid"`
+  # directly below, rather than looping on `kill -0` first. A backgrounded
+  # process that has already exited is a zombie until reaped by `wait` -
+  # `kill -0` on it still reports success. A "check-then-sleep" loop that
+  # calls `sleep` before re-checking will therefore *always* burn at least
+  # one full heartbeat interval, even when curl finished in milliseconds -
+  # that was a real bug here that made every single HTTP call (eval, fetch,
+  # every module load) pay a minimum multi-second tax regardless of actual
+  # speed. Waiting on the pid directly returns the instant curl exits.
+  (
+    local waited=0
+    while kill -0 "$curl_pid" 2>/dev/null; do
+      sleep "$heartbeat"
+      kill -0 "$curl_pid" 2>/dev/null || exit 0
+      waited=$((waited + heartbeat))
+      logWarn "$label still waiting after ${waited}s (server has not responded yet; will give up at ${timeout}s)"
+    done
+  ) &
+  local ticker_pid=$!
 
-  wait "$pid"
+  wait "$curl_pid"
   local rc=$?
   end_ts=$(date +%s)
   local elapsed=$((end_ts - start_ts))
+
+  # The ticker has done its job (or was never needed); stop it without
+  # letting a leftover heartbeat job linger or print after we've moved on.
+  kill "$ticker_pid" 2>/dev/null
+  wait "$ticker_pid" 2>/dev/null
 
   local http_code
   http_code=$(cat "$status_file" 2>/dev/null)

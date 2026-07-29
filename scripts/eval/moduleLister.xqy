@@ -21,31 +21,35 @@ declare variable $limit as xs:string external := "200";
 declare variable $max as xs:integer :=
   try { xs:integer($limit) } catch ($e) { 200 };
 
-(: Escape one regex metacharacter at a time, outside of any character class.
- : A single bracket-expression escaping all metacharacters at once (the
- : previous approach) is invalid in MarkLogic's XSD-flavored regex engine -
- : most of . + ^ $ ( ) { } | lose their special meaning inside [...] and
- : escaping them there raises XDMP-REGEX. Escaping them individually as plain
- : (non-class) atoms is the portable way to do this. Order: backslash first,
- : since later steps must not touch backslashes introduced by earlier ones. :)
-declare function local:regex-escape($s as xs:string) as xs:string
+(: Escape one regex metacharacter at a time.
+ :
+ : NOTE: do not implement this with fn:replace($s, pattern, replacement).
+ : The *replacement* argument to fn:replace has its own escaping grammar
+ : (\ must be followed by \ or a digit; a bare $ is invalid unless written
+ : as \$), which is easy to get subtly wrong - e.g. '\\$' is NOT "backslash
+ : then dollar", it's "escaped backslash" followed by a dangling, invalid
+ : bare $, which raises XDMP-BADREP. Building the escaped string character
+ : by character sidesteps that whole class of bug. :)
+declare function local:escape-char($c as xs:string) as xs:string
 {
-  let $s := fn:replace($s, '\\', '\\\\')
-  let $s := fn:replace($s, '\.', '\\.')
-  let $s := fn:replace($s, '\^', '\\^')
-  let $s := fn:replace($s, '\$', '\\$')
-  let $s := fn:replace($s, '\(', '\\(')
-  let $s := fn:replace($s, '\)', '\\)')
-  let $s := fn:replace($s, '\[', '\\[')
-  let $s := fn:replace($s, '\]', '\\]')
-  let $s := fn:replace($s, '\{', '\\{')
-  let $s := fn:replace($s, '\}', '\\}')
-  let $s := fn:replace($s, '\|', '\\|')
-  let $s := fn:replace($s, '\+', '\\+')
-  return $s
+  if ($c = ('\', '.', '^', '$', '(', ')', '[', ']', '{', '}', '|', '+'))
+  then '\' || $c
+  else $c
 };
 
-(: Translate a glob (*, ?) into an anchored, case-insensitive regex. :)
+declare function local:regex-escape($s as xs:string) as xs:string
+{
+  fn:string-join(
+    for $cp in fn:string-to-codepoints($s)
+    return local:escape-char(fn:codepoints-to-string($cp)),
+    ''
+  )
+};
+
+(: Translate a glob (*, ?) into an anchored, case-insensitive regex.
+ : '*' and '?' are handled separately, after escaping, since they must
+ : remain wildcards rather than literals. Their replacements ('.*' and '.')
+ : contain neither \ nor $, so fn:replace is safe to use for them. :)
 declare function local:glob-to-regex($glob as xs:string) as xs:string
 {
   let $escaped := local:regex-escape($glob)

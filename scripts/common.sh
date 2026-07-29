@@ -376,7 +376,8 @@ showLogs() {
 
   # Validate MarkLogic is reachable
   if ! curl -s --max-time 2 --digest -u "${ML_USER}:${ML_PASS}" \
-    "http://${ML_HOST}:${ML_PORT}/" >/dev/null 2>&1; then
+    "${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}/" >/dev/null 2>&1; then
+    logError "cannot reach MarkLogic at ${ML_HOST}:${ML_PORT}"
     echo "Error: Cannot connect to MarkLogic at ${ML_HOST}:${ML_PORT}"
     return 1
   fi
@@ -385,7 +386,7 @@ showLogs() {
   echo "═══════════════════════════════════════════════════════════"
 
   # Use Management REST API to get logs
-  local rest_url="http://${ML_HOST}:${ML_PORT}/manage/v2/logs"
+  local rest_url="${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}/manage/v2/logs"
 
   if [ "$log_type" = "error" ]; then
     rest_url="${rest_url}?log-type=ErrorLog&limit=${lines}"
@@ -393,13 +394,19 @@ showLogs() {
     rest_url="${rest_url}?log-type=AccessLog&limit=${lines}"
   fi
 
-  local response=$(curl -s --digest -u "${ML_USER}:${ML_PASS}" \
-    -H "Accept: application/json" \
-    "$rest_url" 2>&1)
+  local body_file
+  body_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-logs.XXXXXX")
+  local http_code
+  http_code=$(mlshCurl "logs $log_type" "$body_file" \
+    -sS --digest -u "${ML_USER}:${ML_PASS}" -H "Accept: application/json" "$rest_url")
+  local response
+  response=$(cat "$body_file")
+  rm -f "$body_file"
 
   # Check if response contains error
-  if echo "$response" | grep -q "error"; then
+  if [ "${http_code#2}" = "$http_code" ] || echo "$response" | grep -q "error"; then
     # Fallback to showing raw logs via XQuery if REST API fails
+    logWarn "management log API returned HTTP $http_code; falling back to xdmp:get-request-error-log"
     echo "Note: Using XQuery to fetch logs (REST API not available on this server)"
     echo ""
 

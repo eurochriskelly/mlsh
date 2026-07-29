@@ -155,6 +155,24 @@ mlshCurl() {
   # that was a real bug here that made every single HTTP call (eval, fetch,
   # every module load) pay a minimum multi-second tax regardless of actual
   # speed. Waiting on the pid directly returns the instant curl exits.
+  #
+  # CRITICAL: this subshell's stdout/stderr MUST be explicitly redirected
+  # away from whatever mlshCurl's own stdout/stderr currently are. Every
+  # real caller invokes this as `x=$(mlshCurl ...)` to capture $http_code,
+  # which means mlshCurl's stdout is the write-end of a pipe that the
+  # command-substitution's reader blocks on until it sees EOF. If this
+  # ticker subshell inherits that pipe fd (which it does by default), then
+  # even though `kill "$ticker_pid"` below terminates the ticker itself,
+  # the actual `sleep "$heartbeat"` process it forked is a *grandchild* -
+  # killing the ticker does not kill it, it just gets orphaned and keeps
+  # running (and keeps holding the pipe's write end open) for up to
+  # $heartbeat more seconds. The command substitution can't see EOF until
+  # every process holding that fd closes it, so the caller ends up
+  # blocking for a full heartbeat interval on EVERY SINGLE CALL - which is
+  # exactly the "why is this so slow" symptom, and it has nothing to do
+  # with concurrency; a single sequential call pays it too. Redirecting to
+  # /dev/null here means the forked `sleep` inherits /dev/null instead of
+  # the pipe, so it can't hold it open no matter how long it lingers.
   (
     local waited=0
     while kill -0 "$curl_pid" 2>/dev/null; do
@@ -163,7 +181,7 @@ mlshCurl() {
       waited=$((waited + heartbeat))
       logWarn "$label still waiting after ${waited}s (server has not responded yet; will give up at ${timeout}s)"
     done
-  ) &
+  ) >/dev/null 2>&1 &
   local ticker_pid=$!
 
   wait "$curl_pid"

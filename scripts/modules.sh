@@ -282,8 +282,9 @@ loadModules() {
 loadOneModuleFile() {
   local directory=$1 mode=$2 failures_file=$3 line=$4
 
-  local uri local_name permissions collections
-  IFS='~' read -r uri local_name permissions collections <<<"$line"
+  local uri=${line%%~*}
+  local rest=${line#*~}
+  local local_name=${rest%%~*}
 
   local source_file="$directory/edited/$local_name"
   [ "$mode" = "reset" ] && source_file="$directory/originals/$local_name"

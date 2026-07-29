@@ -161,10 +161,12 @@ alias mod=modules
 
 PS1='\[\033[38;5;141m\]mlsh \[\033[38;5;81m\][${ML_ENV:-none}]\[\033[38;5;141m\]> \[\033[0m\]'
 clear
-printf '%s%s  __  __ _     ____  _   _%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
-printf '%s%s |  \/  | |   / ___|| | | |%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
-printf '%s%s | |\/| | |   \___ \| |_| |%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
-printf '%s%s |_|  |_|_|   |____/ \___/ %s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s ███╗   ███╗██╗     ███████╗██╗  ██╗%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s ████╗ ████║██║     ██╔════╝██║  ██║%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s ██╔████╔██║██║     ███████╗███████║%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s ██║╚██╔╝██║██║     ╚════██║██╔══██║%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s ██║ ╚═╝ ██║███████╗███████║██║  ██║%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s ╚═╝     ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
 printf '%sMarkLogic shell%s  %sEnvironment: %s%s%s\n' \
   "$mlsh_muted" "$mlsh_reset" "$mlsh_muted" "$mlsh_cyan" "${ML_ENV:-none}" "$mlsh_reset"
 printf '%sDiagnostic log:%s %s  %s(session-log show | session-log tail | debug on)%s\n' \

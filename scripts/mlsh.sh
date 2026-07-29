@@ -21,12 +21,10 @@ mlsh_command() {
     echo "No environment selected. Please run 'mlsh env'"
     exit 0
   fi
-  # Define color codes
-  fM='\033[35m'    # Foreground Magenta
-  bM='\033[45m'    # Background Magenta
-  white='\033[97m' # White
-  end='\033[0m'    # End of color string
-  echo -e "${bM}${white} MLSH$ ${end}${fM} - Current env [${end}${white}$ML_ENV${end}${fM}]${end}"
+  if [ "$MLSH_INTERACTIVE" != "1" ]; then
+    # Keep standalone commands identifiable without cluttering the shell.
+    printf '\033[38;5;141mMLSH\033[0m \033[2m[%s]\033[0m\n' "${ML_ENV:-none}"
+  fi
   case $cmd in
   # Core commands
   update)
@@ -84,7 +82,9 @@ mlsh_command() {
     ;;
   esac
 
-  echo -e "${bM}+${end}"
+  if [ "$MLSH_INTERACTIVE" != "1" ]; then
+    printf '\033[2m----------------------------------------\033[0m\n'
+  fi
 }
 
 showHelp() {

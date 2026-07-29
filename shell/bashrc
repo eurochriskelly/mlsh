@@ -2,6 +2,14 @@
 
 test -f "$HOME/.mlshrc-gen" && source "$HOME/.mlshrc-gen"
 source "$MLSH_TOP_DIR/scripts/mlsh.sh"
+export MLSH_INTERACTIVE=1
+
+mlsh_reset=$'\033[0m'
+mlsh_muted=$'\033[38;5;245m'
+mlsh_purple=$'\033[38;5;141m'
+mlsh_cyan=$'\033[38;5;81m'
+mlsh_green=$'\033[38;5;114m'
+mlsh_bold=$'\033[1m'
 
 mlsh() {
   if [ "$#" -eq 0 ]; then
@@ -12,20 +20,23 @@ mlsh() {
 }
 
 mlsh_help() {
-  printf '%s\n' \
-    'MLSH commands:' \
-    '  env                 Create, select, or edit an environment' \
-    '  eval <script> ...   Evaluate XQuery or JavaScript' \
-    '  logs <options>      Query MarkLogic logs' \
-    '  qc <command>        Manage Query Console workspaces' \
-    '  mlcp <args>         Run MLCP' \
-    '  corb <args>         Run CoRB' \
-    '  modules <command>   Manage modules' \
-    '  backup <command>    Manage backups' \
-    '  help <command>      Show detailed command help' \
-    '  exit                Leave MLSH' \
-    '' \
-    'Normal shell commands such as cd, ls, git, pipes, and redirection also work.'
+  printf '\n%s%sCOMMANDS%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+  mlsh_command_line 'env' 'Create, select, or edit an environment'
+  mlsh_command_line 'eval <script> ...' 'Evaluate XQuery or JavaScript'
+  mlsh_command_line 'logs <options>' 'Query MarkLogic logs'
+  mlsh_command_line 'qc <command>' 'Manage Query Console workspaces'
+  mlsh_command_line 'mlcp <args>' 'Run MLCP'
+  mlsh_command_line 'corb <args>' 'Run CoRB'
+  mlsh_command_line 'modules <command>' 'Manage modules'
+  mlsh_command_line 'backup <command>' 'Manage backups'
+  mlsh_command_line 'help <command>' 'Show detailed command help'
+  mlsh_command_line 'exit' 'Leave MLSH'
+  printf '\n%sTip:%s ordinary shell commands such as %scd%s, %sgit%s, pipes, and redirection work too.\n' \
+    "$mlsh_green" "$mlsh_reset" "$mlsh_cyan" "$mlsh_reset" "$mlsh_cyan" "$mlsh_reset"
+}
+
+mlsh_command_line() {
+  printf '  %s%-22s%s %s%s%s\n' "$mlsh_cyan" "$1" "$mlsh_reset" "$mlsh_muted" "$2" "$mlsh_reset"
 }
 
 env() {
@@ -58,11 +69,12 @@ alias e=eval
 alias l=logs
 alias mod=modules
 
-PS1='mlsh [${ML_ENV:-none}]> '
+PS1='\[\033[38;5;141m\]mlsh \[\033[38;5;81m\][${ML_ENV:-none}]\[\033[38;5;141m\]> \[\033[0m\]'
 clear
-printf 'Welcome to MLSH'
-if [ -n "$ML_ENV" ]; then
-  printf ' (%s)' "$ML_ENV"
-fi
-printf '. Type help for commands.\n\n'
+printf '%s%s  __  __ _     ____  _   _%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s |  \/  | |   / ___|| | | |%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s | |\/| | |   \___ \| |_| |%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%s%s |_|  |_|_|   |____/ \___/ %s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
+printf '%sMarkLogic shell%s  %sEnvironment: %s%s%s\n' \
+  "$mlsh_muted" "$mlsh_reset" "$mlsh_muted" "$mlsh_cyan" "${ML_ENV:-none}" "$mlsh_reset"
 mlsh_help

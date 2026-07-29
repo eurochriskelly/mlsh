@@ -37,19 +37,27 @@ findModules() {
     printf '%s\n' "$results"
     return 1
   }
+  local matches=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && [[ "$line" == *"~"* ]] && matches+=("$line")
+  done <<< "$results"
+  if [ "${#matches[@]}" -eq 0 ]; then
+    echo "No modules match '$pattern' in $ML_MODULES_DB."
+    return
+  fi
   echo "Matching modules:"
   local index=1
-  while IFS= read -r line; do
+  for line in "${matches[@]}"; do
     echo "  ${index}. ${line%%~*}"
     index=$((index + 1))
-  done <<< "$results"
+  done
   read -r -p "Numbers to download (for example, 1,3), ALL, or Enter to cancel: " choices
   [ -z "$choices" ] && return
   mkdir -p "$directory/originals" "$directory/edited"
   if [ "$choices" = "ALL" ]; then choices=$(seq -s, 1 $((index - 1))); fi
   local selected=" ${choices//,/ } "
   index=1
-  while IFS= read -r line; do
+  for line in "${matches[@]}"; do
     if [[ "$selected" == *" $index "* ]]; then
       local uri=${line%%~*}
       local local_name=${line#*~}
@@ -59,7 +67,7 @@ findModules() {
       cp "$directory/originals/$local_name" "$directory/edited/$local_name"
     fi
     index=$((index + 1))
-  done <<< "$results"
+  done
   echo "Edit files in $directory/edited, then run: mlsh modules load"
 }
 

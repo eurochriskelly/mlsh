@@ -3,6 +3,8 @@
 test -f "$HOME/.mlshrc-gen" && source "$HOME/.mlshrc-gen"
 source "$MLSH_TOP_DIR/scripts/mlsh.sh"
 export MLSH_INTERACTIVE=1
+export MLSH_SESSION_LOG="${TMPDIR:-/tmp}/mlsh-$(date +%Y%m%d-%H%M%S).log"
+touch "$MLSH_SESSION_LOG"
 
 mlsh_reset=$'\033[0m'
 mlsh_muted=$'\033[38;5;245m'
@@ -16,7 +18,12 @@ mlsh() {
     echo "Already inside the MLSH shell. Type 'help' for commands or 'exit' to leave."
     return
   fi
-  mlsh_command "$@"
+  mlsh_run "$@"
+}
+
+mlsh_run() {
+  mlsh_command "$@" 2>&1 | tee -a "$MLSH_SESSION_LOG"
+  return "${PIPESTATUS[0]}"
 }
 
 mlsh_help() {
@@ -40,7 +47,7 @@ mlsh_command_line() {
 }
 
 env() {
-  mlsh_command env "$@"
+  mlsh_run env "$@"
   test -f "$HOME/.mlshrc-gen" && source "$HOME/.mlshrc-gen"
 }
 
@@ -48,20 +55,20 @@ help() {
   if [ "$#" -eq 0 ]; then
     mlsh_help
   else
-    mlsh_command help "$@"
+    mlsh_run help "$@"
   fi
 }
-eval() { mlsh_command eval "$@"; }
-logs() { mlsh_command logs "$@"; }
-log() { mlsh_command log "$@"; }
-qc() { mlsh_command qc "$@"; }
-qconsole() { mlsh_command qconsole "$@"; }
-mlcp() { mlsh_command mlcp "$@"; }
-corb() { mlsh_command corb "$@"; }
-modules() { mlsh_command modules "$@"; }
-module() { mlsh_command module "$@"; }
-backup() { mlsh_command backup "$@"; }
-update() { mlsh_command update "$@"; }
+eval() { mlsh_run eval "$@"; }
+logs() { mlsh_run logs "$@"; }
+log() { mlsh_run log "$@"; }
+qc() { mlsh_run qc "$@"; }
+qconsole() { mlsh_run qconsole "$@"; }
+mlcp() { mlsh_run mlcp "$@"; }
+corb() { mlsh_run corb "$@"; }
+modules() { mlsh_run modules "$@"; }
+module() { mlsh_run module "$@"; }
+backup() { mlsh_run backup "$@"; }
+update() { mlsh_run update "$@"; }
 
 alias h=help
 alias q=qc
@@ -77,4 +84,5 @@ printf '%s%s | |\/| | |   \___ \| |_| |%s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_
 printf '%s%s |_|  |_|_|   |____/ \___/ %s\n' "$mlsh_bold" "$mlsh_purple" "$mlsh_reset"
 printf '%sMarkLogic shell%s  %sEnvironment: %s%s%s\n' \
   "$mlsh_muted" "$mlsh_reset" "$mlsh_muted" "$mlsh_cyan" "${ML_ENV:-none}" "$mlsh_reset"
+printf '%sSession log:%s %s\n' "$mlsh_muted" "$mlsh_reset" "$MLSH_SESSION_LOG"
 mlsh_help

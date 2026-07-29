@@ -36,6 +36,24 @@ mlsh logs     # View MarkLogic logs
 
 See [NPM_INSTALLATION.md](./NPM_INSTALLATION.md) for more details.
 
+### From a Checkout
+
+After cloning this repository, run `make` to see the available setup and
+development commands. To install the checkout as your local `mlsh` command:
+
+```bash
+make link
+mlsh init
+mlsh env
+```
+
+`make link` installs the project dependencies and runs `npm link`. If you only
+want to try the checkout without adding a global command, run:
+
+```bash
+make run
+```
+
 ## Installation
 
 ### Download

@@ -8,7 +8,16 @@ mlsh() {
   local cmd=$1
   shift
   local args=($@)
-  if [ -z "$ML_ENV" ]; then
+  # Commands that don't require an environment
+  local no_env_cmds=("env" "mlenv" "showenv" "init" "helpme" "help" "update")
+  local needs_env=true
+  for no_env_cmd in "${no_env_cmds[@]}"; do
+    if [ "$cmd" = "$no_env_cmd" ]; then
+      needs_env=false
+      break
+    fi
+  done
+  if [ "$needs_env" = true ] && [ -z "$ML_ENV" ]; then
     echo "No environment selected. Please run 'mlsh env'"
     exit 0
   fi

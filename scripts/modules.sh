@@ -166,10 +166,51 @@ loadModules() {
     echo "No module list found. Run 'mlsh modules find' first."
     return 1
   fi
-  while IFS='~' read -r uri local_name permissions collections; do
+
+  # Load module-info.txt into an array so "one" mode can offer a numbered
+  # pick-list, the same way 'modules find' does.
+  local entries=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && entries+=("$line")
+  done <"$directory/module-info.txt"
+
+  if [ "${#entries[@]}" -eq 0 ]; then
+    echo "No modules found in $directory/module-info.txt."
+    return 1
+  fi
+
+  local selected_indices=" "
+  if [ "$mode" = "one" ]; then
+    echo "Modules available to load:"
+    local index=1
+    for line in "${entries[@]}"; do
+      echo "  ${index}. ${line%%~*}"
+      index=$((index + 1))
+    done
+    read -r -p "Numbers to load (for example, 1,3), ALL, or Enter to cancel: " choices
+    if [ -z "$choices" ]; then
+      echo "Cancelled."
+      return 0
+    fi
+    if [ "$choices" = "ALL" ]; then choices=$(seq -s, 1 $((index - 1))); fi
+    selected_indices=" ${choices//,/ } "
+  fi
+
+  local index=1
+  for line in "${entries[@]}"; do
+    if [ "$mode" = "one" ] && [[ "$selected_indices" != *" $index "* ]]; then
+      index=$((index + 1))
+      continue
+    fi
+    index=$((index + 1))
+
+    local uri local_name permissions collections
+    IFS='~' read -r uri local_name permissions collections <<<"$line"
+
     local source_file="$directory/edited/$local_name"
     [ "$mode" = "reset" ] && source_file="$directory/originals/$local_name"
-    [ -f "$source_file" ] || continue
+    [ -f "$source_file" ] || { echo "Skipping $uri: $source_file not found."; continue; }
+
     local url="${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}/v1/documents?uri=${uri}&database=${ML_MODULES_DB}"
     local body_file
     body_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-load.XXXXXX")
@@ -184,7 +225,7 @@ loadModules() {
       echo "Loaded $uri"
     fi
     rm -f "$body_file"
-  done < "$directory/module-info.txt"
+  done
 }
 
 cloneModule() {

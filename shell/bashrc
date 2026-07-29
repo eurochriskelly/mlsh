@@ -20,6 +20,11 @@ mlsh() {
     echo "Already inside the MLSH shell. Type 'help' for commands or 'exit' to leave."
     return
   fi
+  if [ "$1" = "session-log" ]; then
+    shift
+    session-log "$@"
+    return
+  fi
   mlsh_run "$@"
 }
 

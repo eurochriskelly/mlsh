@@ -67,12 +67,12 @@ try {
 
   test('preserves quoted glob arguments in the command dispatcher', () => {
     const script = path.resolve('scripts/mlsh.sh');
-    const result = spawnSync('bash', ['-c', `source "${script}"; mlsh_command modules '*tran*'`], {
+    const result = spawnSync('bash', ['-c', `source "${script}"; bash() { printf '%s\\n' "$@"; }; mlsh_command modules find '*tran*'`], {
       cwd: home,
       env: { ...process.env, HOME: home, MLSH_TOP_DIR: path.resolve('.'), ML_ENV: 'test' },
       encoding: 'utf8'
     });
-    assert.match(result.stdout, /No modules match '\*tran\*'/);
+    assert.match(result.stdout, /modules\.sh\nfind\n\*tran\*/);
   });
 } finally {
   fs.rmSync(home, { recursive: true, force: true });

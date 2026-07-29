@@ -6,8 +6,5 @@
   "type": "module",
   "scripts": {
     "start": "node env-manager.js"
-  },
-  "dependencies": {
-    "prompts": "^2.4.2"
   }
 }

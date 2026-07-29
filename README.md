@@ -54,6 +54,28 @@ want to try the checkout without adding a global command, run:
 make run
 ```
 
+`mlsh env` stores one editable file per environment in
+`~/.mlsh/environments/`. On first use it creates and opens
+`~/.mlsh/environments/dev.env`; subsequently it lists existing environments
+to edit or lets you create another one. It uses `$EDITOR`, then `nvim`, `vim`,
+or `vi`.
+
+```properties
+# ENV SETTINGS
+name=dev
+protocol=http
+host=localhost
+port=8000
+user=admin
+pass=admin
+
+# Database names
+modules_db=modules
+content_db=content
+triggers_db=triggers
+schemas_db=schemas
+```
+
 ## Installation
 
 ### Download

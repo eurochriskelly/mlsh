@@ -65,6 +65,7 @@ function runBashScript(args) {
     USER: process.env.USER,
     SHELL: process.env.SHELL,
     TERM: process.env.TERM,
+    EDITOR: process.env.EDITOR,
     MLSH_TOP_DIR // This is the key - explicitly set to repo location
   };
   
@@ -89,5 +90,4 @@ function runBashScript(args) {
     process.exit(code || 0);
   });
 }
-
 

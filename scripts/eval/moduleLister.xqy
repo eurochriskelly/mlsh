@@ -17,9 +17,13 @@ xquery version "1.0-ml";
 
 declare variable $pattern as xs:string external;
 declare variable $limit as xs:string external := "200";
+declare variable $timeoutSeconds as xs:string external := "90";
 
 declare variable $max as xs:integer :=
   try { xs:integer($limit) } catch ($e) { 200 };
+
+declare variable $timeLimit as xs:integer :=
+  try { xs:integer($timeoutSeconds) } catch ($e) { 90 };
 
 (: Escape one regex metacharacter at a time.
  :
@@ -150,4 +154,9 @@ declare function local:main($glob as xs:string) as xs:string*
     )
 };
 
-local:main($pattern)
+(: Bound our own execution server-side. If the directory-scan fallback is
+ : genuinely going to take forever (huge database, no lexicon), fail fast
+ : with a clear XDMP-EXTIME instead of running indefinitely - this is a
+ : backstop behind the client's own --max-time cutoff, not a replacement for
+ : it, since the client can't tell "hung" from "just slow" without one. :)
+(xdmp:set-request-time-limit($timeLimit), local:main($pattern))

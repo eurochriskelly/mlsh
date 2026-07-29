@@ -111,38 +111,71 @@ mlshCurlLine() {
   mlshRedact "$rendered"
 }
 
-# mlshCurl - Run curl with full request/response logging.
+# mlshCurl - Run curl with full request/response logging, a hard timeout, and
+# periodic heartbeat log lines so a slow/hung server is visible while it's
+# happening instead of just... silence.
 #
 # Writes the response body to the file named by $2 and echoes the HTTP status
-# code on stdout. Returns curl's exit code.
+# code on stdout. Returns curl's exit code (28 = timed out).
+#
+# Configure the ceiling with MLSH_CURL_TIMEOUT (seconds, default 120) and the
+# heartbeat interval with MLSH_CURL_HEARTBEAT (seconds, default 5).
+#
 # Usage: mlshCurl <label> <body-file> <curl args...>
 mlshCurl() {
   local label=$1 body_file=$2
   shift 2
 
-  logInfo "$label request: $(mlshCurlLine 160 "$@")"
+  local timeout="${MLSH_CURL_TIMEOUT:-120}"
+  local heartbeat="${MLSH_CURL_HEARTBEAT:-5}"
+
+  logInfo "$label request: $(mlshCurlLine 160 "$@") (timeout=${timeout}s)"
   logDebug "$label request (full): $(mlshCurlLine 0 "$@")"
 
-  local start_ms end_ms
-  start_ms=$(date +%s)
+  local start_ts end_ts
+  start_ts=$(date +%s)
+
+  local status_file
+  status_file=$(mktemp "${TMPDIR:-/tmp}/mlsh-status.XXXXXX")
+
+  # Run in the background so we can log heartbeats while curl blocks. The
+  # http status code is written to status_file (via -w) since we can't use
+  # command substitution on a backgrounded process.
+  curl --max-time "$timeout" "$@" -o "$body_file" -w '%{http_code}' \
+    >"$status_file" 2>>"$MLSH_LOG_FILE" &
+  local pid=$!
+
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep "$heartbeat"
+    kill -0 "$pid" 2>/dev/null || break
+    waited=$((waited + heartbeat))
+    logWarn "$label still waiting after ${waited}s (server has not responded yet; will give up at ${timeout}s)"
+  done
+
+  wait "$pid"
+  local rc=$?
+  end_ts=$(date +%s)
+  local elapsed=$((end_ts - start_ts))
 
   local http_code
-  http_code=$(curl "$@" -o "$body_file" -w '%{http_code}' 2>>"$MLSH_LOG_FILE")
-  local rc=$?
+  http_code=$(cat "$status_file" 2>/dev/null)
+  rm -f "$status_file"
 
-  end_ms=$(date +%s)
   local bytes=0
   [ -f "$body_file" ] && bytes=$(wc -c <"$body_file" | tr -d ' ')
 
-  if [ "$rc" -ne 0 ]; then
-    logError "$label transport failure: curl exit=$rc after $((end_ms - start_ms))s"
+  if [ "$rc" -eq 28 ]; then
+    logError "$label TIMED OUT after ${elapsed}s (client --max-time=${timeout}s hit). The server is still processing or hung; this is a hard client-side cutoff, not a diagnosis. Check MarkLogic's own request/task-server logs for what is actually running."
+  elif [ "$rc" -ne 0 ]; then
+    logError "$label transport failure: curl exit=$rc after ${elapsed}s"
   else
-    logInfo "$label response: status=$http_code bytes=$bytes elapsed=$((end_ms - start_ms))s"
+    logInfo "$label response: status=$http_code bytes=$bytes elapsed=${elapsed}s"
   fi
 
   # Failure bodies are logged at warn so they are visible at the default level;
   # successful bodies only at trace, to keep the log small.
-  if [ -f "$body_file" ] && [ "$bytes" -gt 0 ]; then
+  if [ "$rc" -eq 0 ] && [ -f "$body_file" ] && [ "$bytes" -gt 0 ]; then
     case "$http_code" in
     2*) mlshLogBlock trace "$label body" "$(cat "$body_file")" ;;
     *) mlshLogBlock warn "$label body" "$(cat "$body_file")" ;;
@@ -274,6 +307,15 @@ doEval() {
 
   # A transport failure or non-2xx status is an error. Surface it and fail so
   # callers can distinguish "no results" from "the query blew up".
+  if [ "$curl_rc" -eq 28 ]; then
+    logError "eval TIMED OUT script=$script database=$database after ${elapsed}s"
+    echo "Error: eval of $(basename "$script") against '$database' did not respond within ${MLSH_CURL_TIMEOUT:-120}s and was aborted."
+    echo "This is a client-side cutoff, not a diagnosis of what MarkLogic is doing."
+    echo "Check the MarkLogic Query Console 'Query Monitor' or /manage/v2/requests for the actual query still running on the server."
+    echo "To wait longer, set MLSH_CURL_TIMEOUT=<seconds> before running mlsh."
+    echo "See $MLSH_LOG_FILE for heartbeat timestamps."
+    return 1
+  fi
   if [ "$curl_rc" -ne 0 ] || [ "${http_code#2}" = "$http_code" ]; then
     logError "eval failed script=$script database=$database status=${http_code:-none} curl_exit=$curl_rc"
     echo "Error: eval of $(basename "$script") failed against '$database' (HTTP ${http_code:-transport-error})"

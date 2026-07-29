@@ -5,6 +5,10 @@ export MLSH_LOG_SCOPE=modules
 
 TODAY=$(date +%Y%m%d)
 MODULE_FIND_LIMIT=${MLSH_MODULE_FIND_LIMIT:-200}
+# Give the server slightly less time than the client's curl --max-time
+# (MLSH_CURL_TIMEOUT, default 120s in common.sh) so we get MarkLogic's own
+# XDMP-EXTIME error instead of the client cutting the connection first.
+MODULE_FIND_TIMEOUT=${MLSH_MODULE_FIND_TIMEOUT:-90}
 
 main() {
   local option=$1
@@ -70,11 +74,11 @@ findModules() {
     return 1
   fi
 
-  logInfo "find pattern='$pattern' normalised='$search' db='$ML_MODULES_DB' limit=$MODULE_FIND_LIMIT"
+  logInfo "find pattern='$pattern' normalised='$search' db='$ML_MODULES_DB' limit=$MODULE_FIND_LIMIT timeout=${MODULE_FIND_TIMEOUT}s"
 
   local vars
-  vars=$(printf '{"pattern":"%s","limit":"%s"}' \
-    "$(jsonEscape "$search")" "$(jsonEscape "$MODULE_FIND_LIMIT")")
+  vars=$(printf '{"pattern":"%s","limit":"%s","timeoutSeconds":"%s"}' \
+    "$(jsonEscape "$search")" "$(jsonEscape "$MODULE_FIND_LIMIT")" "$(jsonEscape "$MODULE_FIND_TIMEOUT")")
 
   local results status
   results=$(MLSH_EVAL_QUIET=1 doEval \

@@ -58,7 +58,8 @@ make run
 `~/.mlsh/environments/`. On first use it creates and opens
 `~/.mlsh/environments/dev.env`; subsequently it lists existing environments
 to edit or lets you create another one. It uses `$EDITOR`, then `nvim`, `vim`,
-or `vi`.
+or `vi`. The `name` field determines the environment name and file name, so
+change it in the editor to create or rename an environment.
 
 ```properties
 # ENV SETTINGS

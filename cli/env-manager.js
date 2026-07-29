@@ -12,6 +12,7 @@ import {
   environmentPath,
   listEnvironments,
   parseEnvironment,
+  saveEditedEnvironment,
   writeEnvironment
 } from './lib/environment-files.js';
 import { parseExistingMlshrc } from './lib/parser.js';
@@ -86,11 +87,11 @@ async function chooseEnvironment(environments) {
     const marker = name === current ? ' (current)' : '';
     console.log(`  ${index + 1}. ${name} - ${details.protocol || 'http'}://${details.host || 'localhost'}:${details.port || '8000'}${marker}`);
   });
-  console.log('\n  n. Create a new environment');
+  console.log('\n  n. Create a new environment (set name= in the editor)');
   console.log('  q. Quit\n');
   const choice = await prompt('Select an environment to edit: ');
   if (choice.toLowerCase() === 'q' || choice === '') return null;
-  if (choice.toLowerCase() === 'n') return await prompt('New environment name: ');
+  if (choice.toLowerCase() === 'n') return 'new';
   const index = Number(choice) - 1;
   if (!Number.isInteger(index) || !environments[index]) throw new Error('Please enter a listed number, n, or q.');
   return environments[index];
@@ -109,7 +110,8 @@ async function main() {
   }
   const file = writeEnvironment(name, directory);
   edit(file);
-  const settings = activateEnvironment(name, directory, home);
+  const saved = saveEditedEnvironment(file, directory);
+  const settings = activateEnvironment(saved.name, directory, home);
   console.log(`\nActive environment: ${settings.name} (${settings.protocol}://${settings.host}:${settings.port})`);
   console.log(`Edit it again with: mlsh env`);
 }

@@ -11,6 +11,7 @@ import {
   environmentPath,
   listEnvironments,
   parseEnvironment,
+  saveEditedEnvironment,
   writeEnvironment
 } from './lib/environment-files.js';
 
@@ -40,6 +41,15 @@ try {
   test('lists environment files alphabetically', () => {
     writeEnvironment('prod', directory);
     assert.deepEqual(listEnvironments(directory), ['dev', 'prod']);
+  });
+
+  test('uses the name in the file when saving an environment', () => {
+    const file = writeEnvironment('new', directory);
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('name=new', 'name=staging'));
+    const saved = saveEditedEnvironment(file, directory);
+    assert.equal(saved.name, 'staging');
+    assert.ok(fs.existsSync(environmentPath('staging', directory)));
+    assert.ok(!fs.existsSync(file));
   });
 
   test('rejects unsafe environment names', () => {

@@ -20,10 +20,14 @@ export function configDirectory(home = os.homedir()) {
 }
 
 export function environmentPath(name, directory) {
+  validateEnvironmentName(name);
+  return path.join(directory, `${name}.env`);
+}
+
+export function validateEnvironmentName(name) {
   if (!/^[A-Za-z0-9_-]+$/.test(name)) {
     throw new Error('Environment names may contain letters, numbers, dashes, and underscores only.');
   }
-  return path.join(directory, `${name}.env`);
 }
 
 export function defaultEnvironment(name = 'dev') {
@@ -49,6 +53,18 @@ export function writeEnvironment(name, directory) {
   const file = environmentPath(name, directory);
   if (!fs.existsSync(file)) fs.writeFileSync(file, environmentTemplate(name), { mode: 0o600 });
   return file;
+}
+
+export function saveEditedEnvironment(file, directory) {
+  const environment = parseEnvironment(fs.readFileSync(file, 'utf8'));
+  const name = environment.name;
+  validateEnvironmentName(name);
+  const destination = environmentPath(name, directory);
+  if (file !== destination && fs.existsSync(destination)) {
+    throw new Error(`Environment '${name}' already exists. Choose another name in ${file}.`);
+  }
+  if (file !== destination) fs.renameSync(file, destination);
+  return { name, file: destination };
 }
 
 export function listEnvironments(directory) {

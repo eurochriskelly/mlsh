@@ -151,6 +151,9 @@ More information on any command can be found using `mlsh help <command>`.
 | `backup`  | Create and restore backups                | `mlsh backup list`, `mlsh backup create` |
 | `update`  | Update mlsh from GitHub                   | `mlsh update`                            |
 
+`modules`, `qc`, and `backup` are included in MLSH; they do not require
+separate npm plugin packages.
+
 ### Shortcuts
 
 | Alias | Command       |

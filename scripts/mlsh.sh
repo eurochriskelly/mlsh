@@ -59,15 +59,15 @@ mlsh_command() {
     ;;
 
   qc | qconsole)
-    bash $MLSH_TOP_DIR/node_modules/mlsh-plugin-qconsole/src/qconsole.sh "${args[@]}"
+    bash "$MLSH_TOP_DIR/scripts/qconsole.sh" "${args[@]}"
     ;;
 
   b | backup)
-    bash $MLSH_TOP_DIR/node_modules/mlsh-plugin-backup/src/backup.sh "${args[@]}"
+    bash "$MLSH_TOP_DIR/scripts/backup.sh" "${args[@]}"
     ;;
 
   mod | module | modules)
-    bash $MLSH_TOP_DIR/node_modules/mlsh-plugin-modules/src/modules.sh "${args[@]}"
+    bash "$MLSH_TOP_DIR/scripts/modules.sh" "${args[@]}"
     ;;
 
   corb)

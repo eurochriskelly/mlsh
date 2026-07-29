@@ -11,6 +11,14 @@ LL() {
   fi
 }
 
+# fetch - Send an authenticated request to the configured MarkLogic REST API.
+fetch() {
+  local endpoint=$1
+  shift
+  curl --silent --show-error --digest -u "${ML_USER}:${ML_PASS}" \
+    "${ML_PROTOCOL:-http}://${ML_HOST}:${ML_PORT}${endpoint}" "$@"
+}
+
 # doEval - Evaluate a script against a MarkLogic database
 doEval() {
   local script=$1
@@ -302,6 +310,7 @@ runCorb() {
 }
 
 export -f LL
+export -f fetch
 export -f doEval
 export -f showHelp
 export -f mlshUpdate

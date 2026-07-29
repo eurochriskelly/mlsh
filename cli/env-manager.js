@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import readline from 'readline';
+import { fileURLToPath } from 'url';
 import {
   activateEnvironment,
   configDirectory,
@@ -97,9 +98,39 @@ async function chooseEnvironment(environments) {
   return environments[index];
 }
 
-async function main() {
+function printEnvironments(environments) {
+  const current = currentEnvironment(home);
+  if (environments.length === 0) {
+    console.log('No MLSH environments found.');
+    return;
+  }
+  for (const name of environments) {
+    const details = parseEnvironment(fs.readFileSync(environmentPath(name, directory), 'utf8'));
+    const marker = name === current ? '*' : ' ';
+    console.log(`${marker} ${name.padEnd(16)} ${details.protocol || 'http'}://${details.host || 'localhost'}:${details.port || '8000'}`);
+  }
+}
+
+export async function runEnvironmentManager(args = []) {
   migrateLegacyConfig();
   let environments = listEnvironments(directory);
+  const requested = args[0];
+
+  if (requested === 'list' || requested === 'ls') {
+    printEnvironments(environments);
+    return;
+  }
+  if (requested === 'current') {
+    console.log(currentEnvironment(home) || 'none');
+    return;
+  }
+  if (requested && requested !== 'edit' && requested !== 'new') {
+    if (!environments.includes(requested)) throw new Error(`Environment '${requested}' does not exist.`);
+    const settings = activateEnvironment(requested, directory, home);
+    console.log(`Active environment: ${settings.name} (${settings.protocol}://${settings.host}:${settings.port})`);
+    return;
+  }
+
   let name;
   if (environments.length === 0) {
     name = 'dev';
@@ -116,7 +147,10 @@ async function main() {
   console.log(`Edit it again with: mlsh env`);
 }
 
-main().catch(error => {
-  console.error(`mlsh env: ${error.message}`);
-  process.exit(1);
-});
+const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  runEnvironmentManager(process.argv.slice(2)).catch(error => {
+    console.error(`mlsh env: ${error.message}`);
+    process.exit(1);
+  });
+}

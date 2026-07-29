@@ -2,7 +2,6 @@
   "name": "mlsh",
   "version": "1.0.0",
   "description": "MarkLogic shell - A command-line swiss-army knife for interacting with and developing MarkLogic applications",
-  "main": "index.js",
   "type": "module",
   "bin": {
     "mlsh": "bin/mlsh"
@@ -23,7 +22,7 @@
   "author": "Anomaly Co",
   "license": "ISC",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "repository": {
     "type": "git",
@@ -35,27 +34,13 @@
   },
   "files": [
     "bin/",
+    "cli/main.js",
     "cli/env-manager.js",
+    "cli/commands/",
     "cli/lib/",
-    "scripts/common.sh",
-    "scripts/config.sh",
-    "scripts/corb-wrapper.sh",
-    "scripts/eval.sh",
     "scripts/eval/",
-    "scripts/logs.sh",
-    "scripts/mlcp-wrapper.sh",
-    "scripts/mlsh.sh",
-    "scripts/modules.sh",
-    "scripts/qconsole.sh",
-    "scripts/backup.sh",
     "scripts/backup/",
-    "scripts/transfer.sh",
     "shell/",
-    "templates/",
-    "init.sh",
-    "mlshrc.template",
-    "README.md",
-    "CLI_README.md",
-    "INSTALLATION.md"
+    "README.md"
   ]
 }

@@ -82,7 +82,7 @@ npm publish
 
 - Package name: `mlsh`
 - Version: `1.0.0`
-- Tests: All 10 passing
+- Tests: All 15 passing
 - Author: Anomaly Co
 - License: ISC
 - Repository: https://github.com/anomalyco/mlsh

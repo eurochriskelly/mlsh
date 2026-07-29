@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Preserved the interactive Bash shell as MLSH's primary interface while moving command dispatch and implementations to Node.js.
+- Replaced Bash command strings and `eval` calls with structured process argument arrays.
+- Moved environment loading, diagnostic logging, MarkLogic requests, eval, logs, modules, Query Console, backups, MLCP, and CoRB orchestration into testable Node modules.
+- Reduced the shipped Bash surface to `shell/bashrc`, which owns the prompt, first-class command functions, live environment changes, and session transcript.
+- Consolidated installation and usage documentation in `README.md` and raised the Node.js requirement to 18 or later.
+
+### Added
+
+- Direct environment selection with `mlsh env <name>`, plus `mlsh env list` and `mlsh env current`.
+- Tests for the installed command route, shell-safe environment generation, password redaction, MLCP copy arguments, and live environment switching inside the interactive shell.
+
+### Removed
+
+- Legacy Bash command implementations, duplicate environment-manager packages, obsolete migration helpers, and superseded implementation documents.
+
 ## [1.0.0] - 2026-02-18
 
 ### Added

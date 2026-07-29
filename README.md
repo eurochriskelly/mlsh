@@ -1,300 +1,179 @@
-# mlsh (MarkLogic Shell)
+# MLSH — MarkLogic shell
 
-`mlsh` (MarkLogic shell) is a command-line, "swiss-army knife" for
-interacting with and developing MarkLogic Application. It is intended
-as a lowest-common-denominator tool, (fully written in bash), and
-preloaded in your user environment where it can be used across
-projects, regardless of build system.
+MLSH is an interactive development shell and command-line toolkit for MarkLogic.
 
-`mlsh` commands can be run with known parameters and scripted. However,
-if no parameters are provided, they will run interactively.
+Run `mlsh` by itself to enter a real Bash session where MLSH commands are first-class shell functions. Normal shell behavior—including `cd`, Git, history, pipes, redirection, and environment variables—continues to work.
 
-## Quick Start
+```text
+$ mlsh
 
-### Global Installation (Recommended)
+ ███╗   ███╗██╗     ███████╗██╗  ██╗
+ ████╗ ████║██║     ██╔════╝██║  ██║
+ ██╔████╔██║██║     ███████╗███████║
+ ██║╚██╔╝██║██║     ╚════██║██╔══██║
+ ██║ ╚═╝ ██║███████╗███████║██║  ██║
+ ╚═╝     ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝
+MarkLogic shell  Environment: dev
 
-Install MLSH globally as an npm package:
-
-**After publishing to npm registry (coming soon):**
-```bash
-npm install -g mlsh
+mlsh [dev]> cd my-project
+mlsh [dev]> eval queries/check.xqy Documents
+mlsh [dev]> modules find '*transform*'
 ```
 
-**For now, install directly from GitHub:**
+Commands can also be called directly from an ordinary terminal or script:
+
+```bash
+mlsh eval queries/check.xqy Documents
+mlsh logs show-errors
+mlsh qc list
+```
+
+## Architecture
+
+MLSH deliberately has two layers:
+
+- `shell/bashrc` owns the interactive shell experience: prompt, aliases, shell functions, live environment switching, and session transcripts.
+- The Node.js command core owns command parsing, configuration, logging, MarkLogic requests, concurrency, and external-process execution.
+
+The shell functions pass their arguments directly to the Node command core. MLCP, CoRB, and `curl` remain external runtime tools; they are launched without constructing shell command strings.
+
+The XQuery and server-side JavaScript files under `scripts/` are payloads evaluated by MarkLogic, not local shell implementations.
+
+## Installation
+
+Install from GitHub:
+
 ```bash
 npm install -g git+https://github.com/anomalyco/mlsh.git
 ```
 
-Then use it from anywhere:
+Or link a checkout while developing:
 
 ```bash
-mlsh          # Start interactive MLSH shell
-mlsh env      # Change environment interactively
-mlsh eval     # Evaluate XQuery/JavaScript
-mlsh logs     # View MarkLogic logs
+git clone https://github.com/anomalyco/mlsh.git
+cd mlsh
+npm install
+npm link
 ```
 
-See [NPM_INSTALLATION.md](./NPM_INSTALLATION.md) for more details.
+Requirements:
 
-### From a Checkout
+- Node.js 18 or later
+- Bash for the interactive MLSH session
+- `curl` for digest-authenticated MarkLogic requests
+- Java and the CoRB/XCC JARs when using `corb`
+- MLCP when using `mlcp`
 
-After cloning this repository, run `make` to see the available setup and
-development commands. To install the checkout as your local `mlsh` command:
+## Environments
+
+Run the environment manager:
 
 ```bash
-make link
-mlsh init
 mlsh env
 ```
 
-`make link` installs the project dependencies and runs `npm link`. If you only
-want to try the checkout without adding a global command, run:
-
-```bash
-make run
-```
-
-`mlsh env` stores one editable file per environment in
-`~/.mlsh/environments/`. On first use it creates and opens
-`~/.mlsh/environments/dev.env`; subsequently it lists existing environments
-to edit or lets you create another one. It uses `$EDITOR`, then `nvim`, `vim`,
-or `vi`. The `name` field determines the environment name and file name, so
-change it in the editor to create or rename an environment.
+Environments are stored as editable files in `~/.mlsh/environments/`. The active environment name is stored in `~/.mlsh/current-env`.
 
 ```properties
-# ENV SETTINGS
 name=dev
 protocol=http
 host=localhost
 port=8000
 user=admin
 pass=admin
-
-# Database names
 modules_db=modules
 content_db=content
 triggers_db=triggers
 schemas_db=schemas
 ```
 
-## Installation
-
-### Download
-
-To get started, create a folder for mlsh, e.g.
+Useful non-interactive forms:
 
 ```bash
-mkdir -p ~/.mlsh.d
-cd ~/.mlsh.d
+mlsh env list
+mlsh env current
+mlsh env dev
 ```
 
-Then download and unpack the release:
+Inside the MLSH shell, selecting an environment immediately updates the current session and prompt.
+
+Legacy `~/.mlshrc` and `~/.mlshrc.json` configurations are migrated automatically the first time the environment manager runs.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `env` | Create, edit, list, or select environments |
+| `eval` | Evaluate local XQuery or server-side JavaScript |
+| `logs` | Show, search, or follow MarkLogic logs |
+| `qc` | Manage Query Console workspaces |
+| `modules` | Find, download, edit, load, or reset modules |
+| `backup` | Run bundled backup operations |
+| `mlcp` | Run MLCP with active-environment connection defaults |
+| `corb` | Run CoRB with an active-environment connection URI |
+| `session-log` | Locate, display, follow, or clear MLSH logs |
+| `debug` | Change diagnostic verbosity inside the MLSH shell |
+
+Run `help` inside the MLSH shell or `mlsh help <command>` from any terminal for details.
+
+### Evaluate a script
 
 ```bash
-curl -s https://api.github.com/repos/eurochriskelly/mlsh/releases/latest \
-  | grep zipball_url \
-  | awk -F": " '{print $2}' \
-  | awk -F\" '{print $2}' \
-  | wget -qi - -O mlsh.zip
-unzip mlsh.zip
-mv eurochriskelly-mlsh-* mlsh
+mlsh eval query.xqy
+mlsh eval query.xqy Documents
+mlsh eval --script query.sjs --database App-Services --params 'var1=value1'
+mlsh eval query.xqy Documents --vars 'name=Ada&active=true'
 ```
 
-### Configure
+Calling `eval` without arguments opens the interactive script picker for the current directory.
 
-Add the following to your `.profile` or equivalent init file:
+### Work with modules
 
 ```bash
-source ~/.mlsh.d/mlsh/init.sh
+mlsh modules find transform
+mlsh modules load
+mlsh modules loadOne
+mlsh modules reset
 ```
 
-First time you run, a `~/.mlshrc` file is created for your environment.
-Please fix any warnings so you have full mlsh capabilities!
+A bare search term is treated as a contains-style glob. For example, `transform` becomes `*transform*`.
 
-### Dependencies
+### Run MLCP and CoRB
 
-Copy or symlink the following to `~/.mlsh.d/dependencies/`:
-
-- `corb.jar` - MarkLogic CoRB (Coordinated RBalanced) JAR
-- `xcc.jar` - MarkLogic XCC JAR
-- `mlcp/` - MarkLogic Content Pump directory
-
-Update paths in `~/.mlshrc` if you place them elsewhere.
-
-## Updates
-
-To update to the latest version, run:
-
-```bash
-mlsh update
-```
-
-Alternatively, if not using the release, pull the latest code using `git pull`.
-
-## Features & Usage
-
-`mlsh`, when run alone, lists all available commands. Commands are typically
-interactive (but can be scripted) and run using the syntax `mlsh <command>`.
-More information on any command can be found using `mlsh help <command>`.
-
-### Main Commands
-
-| Command   | Description                                | Example                                  |
-|-----------|-------------------------------------------|------------------------------------------|
-| `env`     | Show/switch environments                  | `mlsh env`                               |
-| `qc`      | Push and pull workspaces from database    | `mlsh qc pull`, `mlsh qc push`           |
-| `modules` | Download modules, edit, load & reset      | `mlsh modules find`                      |
-| `eval`    | Evaluate a locally stored script          | `mlsh eval script.xqy Documents`         |
-| `corb`    | Run CoRB jobs                             | `mlsh corb --job myJob`                  |
-| `mlcp`    | Run MLCP with environment defaults        | `mlsh mlcp import --type xml ...`        |
-| `log`     | Query and follow MarkLogic logs           | `mlsh log search --pattern XDMP-AS`      |
-| `backup`  | Create and restore backups                | `mlsh backup list`, `mlsh backup create` |
-| `update`  | Update mlsh from GitHub                   | `mlsh update`                            |
-
-`modules`, `qc`, and `backup` are included in MLSH; they do not require
-separate npm plugin packages.
-
-### Shortcuts
-
-| Alias | Command       |
-|-------|---------------|
-| `mle` | `mlsh eval`   |
-| `mlm` | `mlsh mlcp`   |
-| `mlq` | `mlsh qc`     |
-| `mlc` | `mlsh corb`   |
-| `mlr` | `mlsh rest`   |
-| `mlu` | `mlsh update` |
-| `mli` | `mlsh init`   |
-
-## Usage
-
-### Interactive Mode
-
-Commands run without options will prompt the user for input.
-
-Example:
-
-```bash
-$ mlsh
-# Drops into interactive shell with custom prompt
-
-$ mlsh transfer
-mlsh v0.1.0:
-  Select the source host:
-  1) LOC: http://localhost
-  2) TST: http:/foo.bar.com
-  3) ACC: http://baz.qux.com
-  #? 2
-  
-  Select the destination host:
-  1) LOC: http://localhost
-  #? 1
-  
-  Select a collector or enter name of custom collector:
-  1) First 100 documents
-  2) My favourites list
-  #? ../custom.xqy
-```
-
-### Scripting Mode
-
-Check the help for scripting options:
-
-```bash
-mlsh help <command>
-```
-
-Example:
-
-```bash
-# Execute a script against a specific database
-mlsh eval /path/to/script.xqy Documents
-
-# Execute with variables
-mlsh eval script.sjs App-Services "var1=value1&var2=value2"
-
-# Pull Query Console workspaces
-mlsh qc pull
-
-# List available workspaces
-mlsh qc list
-
-# Run CoRB job
-mlsh corb --job jobName --taskDir path/to/tasks --threads 4
-
-# Search logs for errors in last 10 minutes
-mlsh log show-errors --time 10m
-
-# Follow logs from specific ports
-mlsh log follow --ports 8000,8001,Error,TaskServer
-
-# Search logs for a pattern
-mlsh log search --pattern 'XDMP-AS' --ports 8000,8001
-```
-
-## Configuration
-
-The `~/.mlshrc` file configures your MarkLogic environments:
-
-```bash
-# Installation directory
-export MLSH_TOP_DIR=~/.mlsh.d/mlsh
-
-# Dependency paths
-export CORB_JAR=~/.mlsh.d/dependencies/corb.jar
-export XCC_JAR=~/.mlsh.d/dependencies/xcc.jar
-export MLCP_PATH=~/.mlsh.d/dependencies/mlcp/bin/mlcp.sh
-
-# Default environment
-export ML_ENV=local
-
-# Database names
-export ML_MODULES_DB=modules
-export ML_CONTENT_DB=content
-export ML_TRIGGERS_DB=triggers
-export ML_SCHEMAS_DB=schemas
-
-# Environment-specific settings
-case $ML_ENV in
-  local)
-    export ML_HOST=localhost
-    export ML_PORT=8000
-    export ML_USER=admin
-    export ML_PASS=admin
-    export ML_PROTOCOL=http
-    ;;
-esac
-```
-
-## Interactive Shell
-
-Running `mlsh` without arguments clears the terminal and opens an interactive
-shell. The prompt includes the active environment:
+By default, MLSH looks under `~/.mlsh.d/dependencies/`:
 
 ```text
-mlsh [dev]>
+~/.mlsh.d/dependencies/
+├── corb.jar
+├── xcc.jar
+└── mlcp/bin/mlcp.sh
 ```
 
-Run MLSH commands directly inside the shell, without the `mlsh` prefix. Normal
-shell commands, pipes, redirection, and history remain available.
+Custom locations can be supplied through `CORB_JAR`, `XCC_JAR`, and `MLCP_PATH`.
+
+## Logs
+
+MLSH keeps two separate files:
+
+- `~/.mlsh/mlsh.log` contains structured diagnostic events and redacts the active MarkLogic password.
+- `~/.mlsh/mlsh-session.log` contains the ANSI-stripped output of commands run inside the interactive shell.
+
+Inside the shell:
 
 ```bash
-$ mlsh
-mlsh [dev]> eval script.xqy Documents
-mlsh [dev]> logs show-errors --time 10m
-mlsh [dev]> env
-mlsh [dev]> git status
-mlsh [dev]> exit
+session-log
+session-log show
+session-log tail
+session-log transcript show
+debug on
+debug off
 ```
 
-MLSH command output is appended to the fixed application log
-`~/.mlsh/mlsh.log`. MLSH truncates that file on startup only when it exceeds
-10 MB. Run `session-log` to print the path or `session-log show` to view it.
+## Development
 
-## License
+```bash
+npm test
+npm pack --dry-run
+```
 
-ISC
-
-## Contributing
-
-Contributions welcome! Please submit issues and pull requests on GitHub.
+The test suite covers configuration migration, argument parsing, Node command dispatch, digest-request execution through a fake `curl`, and the interactive shell’s first-class command functions.

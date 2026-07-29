@@ -164,8 +164,8 @@ declare function local:main($glob as xs:string) as xs:string*
  : slow", with no way to tell the difference from the outside. Instead, the
  : REST call always targets the (healthy, ordinary) content database, and we
  : explicitly hop into $targetDatabase ourselves via xdmp:invoke-function,
- : the same technique scripts/eval.sh's modulesWrapper already used for
- : xdmp:eval-based scripts. We also force transaction-mode "query" so this
+ : the same technique the interactive evaluator uses for module-aware
+ : xdmp:eval calls. We also force transaction-mode "query" so this
  : read-only listing can never block waiting for a write lock held by some
  : unrelated update transaction on that database. :)
 (

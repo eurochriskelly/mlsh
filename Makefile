@@ -6,13 +6,12 @@ help:
 	@printf '%s\n' \
 	  'MLSH checkout setup' \
 	  '' \
-	  'Prerequisite: Node.js 14 or later' \
+	  'Prerequisite: Node.js 18 or later' \
 	  '' \
 	  'Getting started from this checkout:' \
 	  '  make install    Install project dependencies' \
 	  '  make link       Make the mlsh command available globally' \
-	  '  mlsh init       Create ~/.mlshrc' \
-	  '  mlsh env        Configure a MarkLogic environment' \
+	  '  mlsh env        Create or migrate your first environment' \
 	  '' \
 	  'Other commands:' \
 	  '  make run        Show mlsh help without linking globally' \

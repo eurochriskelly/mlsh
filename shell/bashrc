@@ -1,8 +1,10 @@
 #!/bin/bash
 
-test -f "$HOME/.mlshrc-gen" && source "$HOME/.mlshrc-gen"
-source "$MLSH_TOP_DIR/scripts/mlsh.sh"
 export MLSH_INTERACTIVE=1
+mlsh_install_dir="$MLSH_TOP_DIR"
+test -f "$HOME/.mlshrc-gen" && source "$HOME/.mlshrc-gen"
+export MLSH_TOP_DIR="$mlsh_install_dir"
+unset mlsh_install_dir
 if [ -z "$MLSH_LOG_FILE" ]; then
   export MLSH_LOG_FILE="$HOME/.mlsh/mlsh.log"
 fi
@@ -18,7 +20,8 @@ for mlsh_f in "$MLSH_LOG_FILE" "$MLSH_SESSION_LOG_FILE"; do
 done
 unset mlsh_f
 export MLSH_LOG_LEVEL="${MLSH_LOG_LEVEL:-info}"
-logInfo "session started env=${ML_ENV:-none} host=${ML_HOST:-unset}:${ML_PORT:-unset} pid=$$"
+printf '%s INFO  [shell] session started env=%s host=%s:%s pid=%s\n' \
+  "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "${ML_ENV:-none}" "${ML_HOST:-unset}" "${ML_PORT:-unset}" "$$" >>"$MLSH_LOG_FILE"
 
 mlsh_reset=$'\033[0m'
 mlsh_muted=$'\033[38;5;245m'
@@ -43,14 +46,8 @@ mlsh() {
 # mlsh_run - Run a command, logging the invocation and its exit status to the
 # diagnostic log, and the (ANSI-stripped) terminal output to the session log.
 mlsh_run() {
-  logInfo "command: $*"
-  mlsh_command "$@" 2>&1 | tee >(sed $'s/\033\\[[0-9;]*[a-zA-Z]//g' >>"$MLSH_SESSION_LOG_FILE")
+  node "$MLSH_TOP_DIR/bin/mlsh" "$@" 2>&1 | tee >(sed $'s/\033\\[[0-9;]*[a-zA-Z]//g' >>"$MLSH_SESSION_LOG_FILE")
   local status="${PIPESTATUS[0]}"
-  if [ "$status" -ne 0 ]; then
-    logWarn "command failed: $* (exit $status)"
-  else
-    logDebug "command ok: $*"
-  fi
   return "$status"
 }
 
@@ -77,7 +74,7 @@ mlsh_command_line() {
 }
 
 env() {
-  mlsh_run env "$@"
+  mlsh_run env "$@" || return
   test -f "$HOME/.mlshrc-gen" && source "$HOME/.mlshrc-gen"
 }
 

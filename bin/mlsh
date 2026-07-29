@@ -4,14 +4,15 @@
  * MLSH - MarkLogic Shell
  * Entry point for global npm installation
  *
- * This Node.js wrapper discovers the mlsh installation and
- * delegates to the bash implementation.
+ * Node.js command entry point and interactive-shell launcher.
  */
 
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import os from 'os';
+import { runCli } from '../cli/main.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,9 +23,8 @@ const MLSH_TOP_DIR = path.resolve(__dirname, '..');
 
 // Verify key files exist
 const requiredFiles = [
-  'scripts/mlsh.sh',
-  'init.sh',
-  'mlshrc.template'
+  'cli/main.js',
+  'shell/bashrc'
 ];
 
 const missingFiles = requiredFiles.filter(file => {
@@ -42,25 +42,24 @@ if (missingFiles.length > 0) {
 // Set up environment
 process.env.MLSH_TOP_DIR = MLSH_TOP_DIR;
 
-// Get command and arguments
-const [, , ...args] = process.argv;
-
-if (args[0] === 'session-log') {
-  showLog(args.slice(1));
-} else if (args.length === 0) {
-  // Start the interactive MLSH shell when no command is supplied.
-  runInteractiveShell();
-} else {
-  // Otherwise, run the bash mlsh.sh script
-  runBashScript(args);
+async function main() {
+  const [, , ...args] = process.argv;
+  if (args[0] === 'session-log') showLog(args.slice(1));
+  else if (args.length === 0) runInteractiveShell();
+  else process.exitCode = await runCli(args, { topDir: MLSH_TOP_DIR });
 }
 
+main().catch(error => {
+  console.error(`mlsh: ${error.message}`);
+  process.exitCode = 1;
+});
+
 function logFilePath() {
-  return path.join(process.env.HOME, '.mlsh', 'mlsh.log');
+  return path.join(process.env.HOME || os.homedir(), '.mlsh', 'mlsh.log');
 }
 
 function sessionLogFilePath() {
-  return path.join(process.env.HOME, '.mlsh', 'mlsh-session.log');
+  return path.join(process.env.HOME || os.homedir(), '.mlsh', 'mlsh-session.log');
 }
 
 function showLog(args) {
@@ -98,27 +97,8 @@ function runInteractiveShell() {
   });
 }
 
-/**
- * Run a bash script with arguments
- */
-function runBashScript(args) {
-  const bash = spawn('bash', [path.join(MLSH_TOP_DIR, 'scripts/mlsh.sh'), ...args], {
-    stdio: 'inherit',
-    env: shellEnvironment()
-  });
-
-  bash.on('error', (err) => {
-    console.error('Error running mlsh:', err.message);
-    process.exit(1);
-  });
-
-  bash.on('exit', (code) => {
-    process.exit(code || 0);
-  });
-}
-
 function shellEnvironment() {
-  const logDirectory = path.join(process.env.HOME, '.mlsh');
+  const logDirectory = path.join(process.env.HOME || os.homedir(), '.mlsh');
   const logFile = logFilePath();
   const sessionLogFile = sessionLogFilePath();
   fs.mkdirSync(logDirectory, { recursive: true, mode: 0o700 });
@@ -132,26 +112,12 @@ function shellEnvironment() {
   }
 
   const env = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    USER: process.env.USER,
-    SHELL: process.env.SHELL,
-    TERM: process.env.TERM,
-    EDITOR: process.env.EDITOR,
-    TMPDIR: process.env.TMPDIR,
+    ...process.env,
+    HOME: process.env.HOME || os.homedir(),
     MLSH_LOG_FILE: logFile,
     MLSH_SESSION_LOG_FILE: sessionLogFile,
     MLSH_TOP_DIR // This is the key - explicitly set to repo location
   };
-
-  // Copy over any user-specific env vars (but MLSH_TOP_DIR will override).
-  // MLSH_* must pass through so MLSH_LOG_LEVEL / MLSH_DEBUG actually take effect.
-  for (const key of Object.keys(process.env)) {
-    if (!env.hasOwnProperty(key) &&
-        (key.startsWith('ML_') || key.startsWith('MLCP_') || key.startsWith('MLSH_'))) {
-      env[key] = process.env[key];
-    }
-  }
 
   return env;
 }

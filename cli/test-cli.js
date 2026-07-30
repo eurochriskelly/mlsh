@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { parseEvalArgs, pairsToJson, resolveScript } from './commands/eval.js';
-import { buildScriptBar, buildStatusLine, resolveSelection } from './commands/eval-tui.js';
+import { buildScriptBar, buildStatusLine, resolveImmediate, resolveSelection } from './commands/eval-tui.js';
 import { openControllingTty, paintRow, padTo, truncateVisible, visibleLength } from './lib/tui.js';
 import { mlcpConnectionArgs } from './commands/external.js';
 import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
@@ -166,6 +166,28 @@ try {
     assert.equal(resolveSelection('3', scripts), 'c.sjs');
     assert.equal(resolveSelection('9', scripts), null);
     assert.equal(resolveSelection('', scripts), null);
+  });
+
+  test('eval-tui: resolveImmediate fires immediately whenever a list has 9 or fewer scripts', () => {
+    const scripts = Array.from({ length: 3 }, (_, index) => `script${index + 1}.xqy`);
+    assert.equal(resolveImmediate('1', scripts), true);
+    assert.equal(resolveImmediate('2', scripts), true);
+    assert.equal(resolveImmediate('', scripts), false);
+  });
+
+  test('eval-tui: resolveImmediate waits only when a longer selection is still possible', () => {
+    const scripts = Array.from({ length: 15 }, (_, index) => `script${index + 1}.xqy`);
+    // "1" could still become "10".."15" - ambiguous, must wait for more digits or a timeout/Enter.
+    assert.equal(resolveImmediate('1', scripts), false);
+    // "2".."9" can never be the start of a valid two-digit script (max is 15) - immediate.
+    assert.equal(resolveImmediate('2', scripts), true);
+    assert.equal(resolveImmediate('9', scripts), true);
+    // "12" is already two digits, the max any script index can have - immediate.
+    assert.equal(resolveImmediate('12', scripts), true);
+  });
+
+  test('eval-tui: resolveImmediate fires immediately when there are no scripts', () => {
+    assert.equal(resolveImmediate('1', []), true);
   });
 
   test('eval-tui: buildScriptBar renders a compact numbered list with dividers', () => {

@@ -58,6 +58,25 @@ export function resolveSelection(buffer, scripts) {
   return scripts[index] || null;
 }
 
+// Decides whether a digit buffer is unambiguous and should fire immediately
+// rather than waiting for more digits (or Enter). It's unambiguous as soon as
+// no valid script index has `buffer` as a strict prefix with *more* digits -
+// e.g. with 15 scripts, buffer "1" is ambiguous (could become "10".."15"), but
+// buffer "2".."9" is immediate (no valid two-digit script starts with them).
+// Pure + testable.
+export function resolveImmediate(buffer, scripts) {
+  if (!buffer) return false;
+  const total = scripts.length;
+  if (total === 0) return true;
+  for (let index = 1; index <= total; index++) {
+    const text = String(index);
+    if (text.length > buffer.length && text.startsWith(buffer)) return false;
+  }
+  return true;
+}
+
+const SELECTION_DEBOUNCE_MS = 300;
+
 export function buildStatusLine({ width = 80, editArmed, buffer, lastScript, database, elapsed }) {
   return paintRow(COLOR.statusBg, width, (segment, literal) => {
     const modeText = editArmed ? 'EDIT' : 'RUN';
@@ -212,38 +231,63 @@ export async function runEvalTui(context, ttyHandle) {
   };
 
   let stopKeys = () => {};
+  let debounceTimer = null;
+
+  const clearDebounce = () => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+  };
+
+  // Resolves the current buffer (running the script or opening it for edit,
+  // depending on mode), then clears the buffer/timer. Used by both immediate
+  // single-key selection and the debounce timeout/Enter fallback.
+  const selectAndAct = async (value) => {
+    clearDebounce();
+    const script = resolveSelection(value, scripts);
+    buffer = '';
+    if (!script) { draw(); return; }
+    if (editArmed) {
+      editArmed = false;
+      await editScript(script);
+      return;
+    }
+    await runScript(script);
+  };
 
   function startInput() {
     stopKeys = startKeypresses(async (chunk, key) => {
       if (!key) return;
       if (key.ctrl && key.name === 'c') return finish();
       if (key.name === 'q' && !editArmed) return finish();
-      if (key.name === 'e') { editArmed = true; buffer = ''; draw(); return; }
-      if (key.name === 'p') { await promptForParams(); return; }
-      if (key.name === 'backspace') { buffer = buffer.slice(0, -1); draw(); return; }
-      if (key.name === 'escape') { buffer = ''; editArmed = false; draw(); return; }
-      if (key.name >= '0' && key.name <= '9') { buffer += key.name; draw(); return; }
+      if (key.name === 'e') { clearDebounce(); editArmed = true; buffer = ''; draw(); return; }
+      if (key.name === 'p') { clearDebounce(); await promptForParams(); return; }
+      if (key.name === 'backspace') { clearDebounce(); buffer = buffer.slice(0, -1); draw(); return; }
+      if (key.name === 'escape') { clearDebounce(); buffer = ''; editArmed = false; draw(); return; }
+      if (key.name >= '0' && key.name <= '9') {
+        clearDebounce();
+        buffer += key.name;
+        draw();
+        if (resolveImmediate(buffer, scripts)) await selectAndAct(buffer);
+        else debounceTimer = setTimeout(() => selectAndAct(buffer), SELECTION_DEBOUNCE_MS);
+        return;
+      }
       if (key.name === 'return' || key.name === 'enter') {
+        clearDebounce();
         if (!buffer) {
           if (!editArmed && lastScript) await runScript(lastScript);
           draw();
           return;
         }
-        const script = resolveSelection(buffer, scripts);
-        buffer = '';
-        if (!script) { draw(); return; }
-        if (editArmed) {
-          editArmed = false;
-          await editScript(script);
-          return;
-        }
-        await runScript(script);
+        await selectAndAct(buffer);
         return;
       }
     }, input);
   }
 
   function finish() {
+    clearDebounce();
     stopKeys();
     showCursor(output);
     exitAltScreen(output);

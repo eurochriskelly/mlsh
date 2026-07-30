@@ -147,13 +147,15 @@ try {
   test('normalises module patterns and parses server records', () => {
     assert.equal(normalisePattern('customer'), '*customer*');
     assert.equal(normalisePattern('*customer?.xqy'), '*customer?.xqy');
-    assert.deepEqual(parseModuleRecord('/a.xqy~%a.xqy~read~apps~EOL'), {
-      line: '/a.xqy~%a.xqy~read~apps~EOL',
-      uri: '/a.xqy',
-      localName: '%a.xqy',
-      permissions: 'read',
-      collections: 'apps'
-    });
+    const record = parseModuleRecord('{"uri":"/a.xqy","permissions":["read=apps"],"collections":["apps"]}');
+    assert.equal(record.uri, '/a.xqy');
+    assert.equal(record.localName, '%a.xqy');
+    assert.deepEqual(record.permissions, ['read=apps']);
+    assert.deepEqual(record.collections, ['apps']);
+    const derived = parseModuleRecord('{"uri":"/b.xqy"}');
+    assert.equal(derived.localName, '%b.xqy');
+    assert.deepEqual(derived.permissions, []);
+    assert.deepEqual(derived.collections, []);
   });
 
   test('tui: visibleLength ignores ANSI escape codes', () => {
@@ -327,10 +329,10 @@ try {
     const newer = path.join(workspaceRoot, 'modules_20260729');
     fs.mkdirSync(older, { recursive: true });
     fs.mkdirSync(newer, { recursive: true });
-    fs.writeFileSync(path.join(older, 'module-info.txt'), '/old.xqy~old.xqy~~~EOL\n');
-    fs.writeFileSync(path.join(newer, 'module-info.txt'), '/new.xqy~new.xqy~~~EOL\n');
-    fs.utimesSync(path.join(older, 'module-info.txt'), new Date(1000), new Date(1000));
-    fs.utimesSync(path.join(newer, 'module-info.txt'), new Date(2000), new Date(2000));
+    fs.writeFileSync(path.join(older, 'module-info.jsonl'), '{"uri":"/old.xqy"}\n');
+    fs.writeFileSync(path.join(newer, 'module-info.jsonl'), '{"uri":"/new.xqy"}\n');
+    fs.utimesSync(path.join(older, 'module-info.jsonl'), new Date(1000), new Date(1000));
+    fs.utimesSync(path.join(newer, 'module-info.jsonl'), new Date(2000), new Date(2000));
 
     const selected = resolveModuleWorkspace({ cwd: workspaceRoot, date: '20990101' });
     assert.equal(selected.directory, newer);
@@ -361,8 +363,8 @@ try {
     const fakeBin = path.join(root, 'bin');
     fs.mkdirSync(edited, { recursive: true });
     fs.mkdirSync(fakeBin);
-    fs.writeFileSync(path.join(workspace, 'module-info.txt'), '/old.xqy~old.xqy~~~EOL\n');
-    fs.writeFileSync(path.join(edited, 'old.xqy'), 'xquery version "1.0-ml"; 1');
+    fs.writeFileSync(path.join(workspace, 'module-info.jsonl'), '{"uri":"/old.xqy"}\n');
+    fs.writeFileSync(path.join(edited, '%old.xqy'), 'xquery version "1.0-ml"; 1');
     const curl = path.join(fakeBin, 'curl');
     fs.writeFileSync(curl, `#!/bin/sh
 output=
@@ -395,10 +397,10 @@ printf '200'
      fs.mkdirSync(older, { recursive: true });
      fs.mkdirSync(newer, { recursive: true });
      fs.mkdirSync(fakeBin);
-     fs.writeFileSync(path.join(older, 'module-info.txt'), '');
-     fs.writeFileSync(path.join(newer, 'module-info.txt'), '');
-     fs.utimesSync(path.join(older, 'module-info.txt'), new Date(1000), new Date(1000));
-     fs.utimesSync(path.join(newer, 'module-info.txt'), new Date(2000), new Date(2000));
+     fs.writeFileSync(path.join(older, 'module-info.jsonl'), '');
+     fs.writeFileSync(path.join(newer, 'module-info.jsonl'), '');
+     fs.utimesSync(path.join(older, 'module-info.jsonl'), new Date(1000), new Date(1000));
+     fs.utimesSync(path.join(newer, 'module-info.jsonl'), new Date(2000), new Date(2000));
      
      // Create and activate an environment with modules_db configured
      const envDir = configDirectory(mlshHome);
@@ -415,7 +417,7 @@ for argument in "$@"; do
   previous="$argument"
 done
 cat > "$output" << 'CURL_EOF'
-/test.xqy~test.xqy~read~apps~EOL
+{"uri":"/test.xqy","permissions":["read=apps"],"collections":["apps"]}
 CURL_EOF
 printf '200'
 `);
@@ -443,7 +445,7 @@ printf '200'
      const mlshHome = path.join(root, 'mlsh-home');
      fs.mkdirSync(existing, { recursive: true });
      fs.mkdirSync(fakeBin);
-     fs.writeFileSync(path.join(existing, 'module-info.txt'), '');
+     fs.writeFileSync(path.join(existing, 'module-info.jsonl'), '');
      
      // Create and activate an environment with modules_db configured
      const envDir = configDirectory(mlshHome);
@@ -460,7 +462,7 @@ for argument in "$@"; do
   previous="$argument"
 done
 cat > "$output" << 'CURL_EOF'
-/test.xqy~test.xqy~read~apps~EOL
+{"uri":"/test.xqy","permissions":["read=apps"],"collections":["apps"]}
 CURL_EOF
 printf '200'
 `);

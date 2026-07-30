@@ -3,8 +3,8 @@ xquery version "1.0-ml";
 (:
  : Lists module URIs matching a wildcard pattern.
  :
- : Emits one '~'-delimited record per match:
- :   <uri>~<flattened-name>~<permissions>~<collections>~EOL
+ : Emits one JSON record per match, one per line (JSON Lines):
+ :   {"uri": "<uri>", "permissions": ["<role>=<capability>", ...], "collections": ["<name>", ...]}
  :
  : Matching strategy, in order of preference:
  :   1. cts:uri-match  - fast, needs the URI lexicon enabled on the database.
@@ -111,6 +111,25 @@ declare function local:resolve($glob as xs:string) as item()*
           return ($lexicon[fn:starts-with(., 'MLSH-DIAG:')], 'MLSH-DIAG:strategy=directory-scan', $scan)
 };
 
+(: Escape a string for embedding as a JSON string literal (without the
+ : surrounding quotes). Handles the two characters that are guaranteed to
+ : appear in module URIs/permissions/collections that would otherwise break
+ : JSON: backslash and double-quote. :)
+declare function local:json-escape($s as xs:string) as xs:string
+{
+  fn:replace(fn:replace($s, '\\', '\\\\'), '"', '\\"')
+};
+
+declare function local:json-string($s as xs:string) as xs:string
+{
+  '"' || local:json-escape($s) || '"'
+};
+
+declare function local:json-array($items as xs:string*) as xs:string
+{
+  '[' || fn:string-join(for $item in $items return local:json-string($item), ',') || ']'
+};
+
 (: Permissions and collections are best-effort: a privilege error on one
  : document must not abort the whole listing. :)
 declare function local:describe($uri as xs:string) as xs:string
@@ -118,19 +137,17 @@ declare function local:describe($uri as xs:string) as xs:string
   let $permissions :=
     try {
       xdmp:document-get-permissions($uri) !
-        ('perm:' || xdmp:role-name(./*:role-id/xs:integer(.)) || '=' || ./*:capability/fn:string())
+        (xdmp:role-name(./*:role-id/xs:integer(.)) || '=' || ./*:capability/fn:string())
     }
-    catch ($e) { 'perm:unavailable' }
-  let $collections :=
-    try { xdmp:document-get-collections($uri) ! ('collection=' || .) }
     catch ($e) { () }
-  return fn:string-join((
-    $uri,
-    fn:replace($uri, '/', '%'),
-    fn:string-join($permissions, '#AMP#'),
-    fn:string-join($collections, '#AMP#'),
-    'EOL'
-  ), '~')
+  let $collections :=
+    try { xdmp:document-get-collections($uri) }
+    catch ($e) { () }
+  return
+    '{"uri":' || local:json-string($uri) ||
+    ',"permissions":' || local:json-array($permissions) ||
+    ',"collections":' || local:json-array($collections) ||
+    '}'
 };
 
 declare function local:main($glob as xs:string) as xs:string*

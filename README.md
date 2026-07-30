@@ -139,7 +139,20 @@ mlsh modules load --workspace modules_20260729
 
 A bare search term is treated as a contains-style glob. For example, `transform` becomes `*transform*`.
 Load, reset, and clone use today's module workspace when available, otherwise
-the newest `modules_*` directory containing `module-info.txt`.
+the newest `modules_*` directory containing `module-info.jsonl`.
+
+Each module workspace tracks its modules in `module-info.jsonl`, a JSON Lines
+file with one record per module:
+
+```jsonl
+{"uri": "/transform.xqy", "permissions": ["app-user=read"], "collections": ["apps"]}
+```
+
+Only `uri` is required — `localName` (the file name under `originals/`/`edited/`),
+`permissions`, and `collections` are optional and derived/defaulted if omitted.
+This makes it easy to hand-add a record (for example after `modules clone`)
+by appending a line like `{"uri": "/new.xqy"}`.
+
 
 ### Run MLCP and CoRB
 

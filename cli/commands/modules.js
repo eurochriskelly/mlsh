@@ -13,9 +13,21 @@ export function normalisePattern(pattern) {
   return /[*?]/.test(pattern) ? pattern : `*${pattern}*`;
 }
 
+function deriveLocalName(uri) {
+  return uri.replace(/\//g, '%');
+}
+
 export function parseModuleRecord(line) {
-  const [uri, localName, permissions, collections] = line.split('~');
-  return { line, uri, localName, permissions, collections };
+  const parsed = JSON.parse(line);
+  if (!parsed.uri) throw new Error(`Module record is missing "uri": ${line}`);
+  const record = {
+    uri: parsed.uri,
+    localName: parsed.localName || deriveLocalName(parsed.uri),
+    permissions: parsed.permissions || [],
+    collections: parsed.collections || []
+  };
+  record.line = JSON.stringify(record);
+  return record;
 }
 
 function selectedItems(items, choice) {
@@ -46,7 +58,7 @@ function datedModuleDirectory(cwd = process.cwd()) {
 }
 
 function hasModuleList(directory) {
-  return fs.existsSync(path.join(directory, 'module-info.txt'));
+  return fs.existsSync(path.join(directory, 'module-info.jsonl'));
 }
 
 function tryResolveModuleWorkspace(options) {
@@ -64,7 +76,7 @@ export function resolveModuleWorkspace({ cwd = process.cwd(), requested, date = 
     if (!hasModuleList(directory)) {
       throw new Error([
         `Module workspace is missing its module list: ${directory}`,
-        `Expected: ${path.join(directory, 'module-info.txt')}`,
+        `Expected: ${path.join(directory, 'module-info.jsonl')}`,
         "Choose a workspace created by 'modules find'."
       ].join('\n'));
     }
@@ -83,16 +95,16 @@ export function resolveModuleWorkspace({ cwd = process.cwd(), requested, date = 
     .map(entry => path.join(currentDirectory, entry.name));
   const candidates = discovered
     .filter(hasModuleList)
-    .map(directory => ({ directory, modified: fs.statSync(path.join(directory, 'module-info.txt')).mtimeMs }))
+    .map(directory => ({ directory, modified: fs.statSync(path.join(directory, 'module-info.jsonl')).mtimeMs }))
     .sort((left, right) => right.modified - left.modified || right.directory.localeCompare(left.directory));
   if (candidates.length) return { directory: candidates[0].directory, reason: 'latest', candidates: candidates.map(candidate => candidate.directory) };
 
   const details = [
     `No module workspace found in ${currentDirectory}.`,
-    `Expected: ${path.join(expected, 'module-info.txt')}`
+    `Expected: ${path.join(expected, 'module-info.jsonl')}`
   ];
   if (discovered.length) {
-    details.push('Found directories without module-info.txt:');
+    details.push('Found directories without module-info.jsonl:');
     details.push(...discovered.map(directory => `  ${directory}`));
   }
   details.push("Run 'modules find <pattern>' first, or use 'modules load --workspace <directory>'.");
@@ -135,7 +147,7 @@ async function findModules(context, suppliedPattern, requestedWorkspace, forceNe
    const lines = evaluated.response.replace(/\r/g, '').split('\n');
    const diagnostics = lines.filter(line => line.startsWith('MLSH-DIAG:')).map(line => line.slice('MLSH-DIAG:'.length));
    diagnostics.forEach(line => context.logger.info(`server: ${line}`));
-   const records = lines.filter(line => line.includes('~') && line.endsWith('~EOL')).map(parseModuleRecord);
+   const records = lines.filter(line => line.startsWith('{')).map(parseModuleRecord);
    if (!records.length) {
      console.log(`No modules match '${search}' in ${modulesDatabase}.`);
      if (diagnostics.length) console.log(`Server diagnostics:\n${diagnostics.map(line => `  ${line}`).join('\n')}`);
@@ -187,7 +199,7 @@ async function findModules(context, suppliedPattern, requestedWorkspace, forceNe
   });
   const successes = results.filter(result => result?.ok).map(result => result.record.line);
   const failures = results.map((result, index) => ({ result, record: selected[index] })).filter(({ result }) => !result?.ok);
-  if (successes.length) fs.appendFileSync(path.join(directory, 'module-info.txt'), `${successes.join('\n')}\n`);
+  if (successes.length) fs.appendFileSync(path.join(directory, 'module-info.jsonl'), `${successes.join('\n')}\n`);
   if (failures.length) {
     console.error(`Some modules failed to download:\n${failures.map(({ record, result }) => `  ${record.uri}: ${result?.error?.message || 'unknown error'}`).join('\n')}`);
   }
@@ -196,7 +208,7 @@ async function findModules(context, suppliedPattern, requestedWorkspace, forceNe
 }
 
 function readModuleEntries(directory) {
-  const info = path.join(directory, 'module-info.txt');
+  const info = path.join(directory, 'module-info.jsonl');
   return fs.readFileSync(info, 'utf8').split(/\r?\n/).filter(Boolean).map(parseModuleRecord);
 }
 
@@ -211,7 +223,7 @@ async function loadModules(context, mode = '', requestedWorkspace) {
   }
   context.logger.info(`module workspace=${directory} selection=${workspace.reason} cwd=${process.cwd()}`);
   let records = readModuleEntries(directory);
-  if (!records.length) throw new Error(`No modules found in ${path.join(directory, 'module-info.txt')}.`);
+  if (!records.length) throw new Error(`No modules found in ${path.join(directory, 'module-info.jsonl')}.`);
   if (mode === 'one') {
     console.log('Modules available to load:');
     records.forEach((record, index) => console.log(`  ${index + 1}. ${record.uri}`));
@@ -260,7 +272,7 @@ async function cloneModule(requestedWorkspace) {
   for (const subdirectory of ['originals', 'edited']) {
     fs.copyFileSync(path.join(directory, subdirectory, source), path.join(directory, subdirectory, target));
   }
-  console.log(`Cloned ${source} to ${target}. Add its destination URI to ${path.join(path.basename(directory), 'module-info.txt')} before loading.`);
+  console.log(`Cloned ${source} to ${target}. Add its destination URI to ${path.join(path.basename(directory), 'module-info.jsonl')} before loading.`);
   return 0;
 }
 

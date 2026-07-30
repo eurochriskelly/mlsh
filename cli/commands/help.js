@@ -10,12 +10,12 @@ Options:
   -v, --vars <pairs>       Convert key=value pairs to JSON
 
 Running 'mlsh eval' with no script opens an interactive picker for scripts
-(.xqy, .js, .sjs) in the current directory. In a real terminal this is a
-full-screen navigator:
+(.xqy, .js, .sjs, .sql, .spl) in the current directory. In a real terminal
+this is a full-screen navigator:
   [\u2191/\u2193 j/k] browse scripts   [ENTER] view the selected script
   [r] run             [e] edit it ($EDITOR/nvim/vim/vi)
-  [s] back to the script list         [p] set query params
-  [q] or Ctrl+C to quit`,
+  [s] back to the script list         [a] add a new script file
+  [p] set query params                [q] or Ctrl+C to quit`,
   modules: `Usage: mlsh modules {find <pattern>|new <pattern>|load|loadOne|clone|reset} [--workspace <directory>]
 
 Download modules for local editing and load them back into MarkLogic.

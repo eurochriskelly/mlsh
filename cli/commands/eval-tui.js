@@ -16,7 +16,7 @@ import {
   visibleLength,
   watchResize
 } from '../lib/tui.js';
-import { databaseOverride, formatDisplay, listScripts, performEval, prepareScript } from './eval.js';
+import { databaseOverride, formatDisplay, isSupportedScriptFile, listScripts, performEval, prepareScript, SCRIPT_EXTENSIONS } from './eval.js';
 
 const COLOR = {
   sidebarBg: 235,
@@ -130,11 +130,25 @@ export function combineColumns(leftRows, rightRows) {
   return leftRows.map((left, index) => left + (rightRows[index] || ''));
 }
 
+// Formats a duration in milliseconds as e.g. "45s", "23m12s", or "1h2m3s".
+// Pure + testable.
+export function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
+  if (hours) parts.push(`${hours}h`);
+  if (hours || minutes) parts.push(`${minutes}m`);
+  parts.push(`${seconds}s`);
+  return parts.join('');
+}
+
 export function buildStatusLine({ width = 80, mode, lastScript, database, elapsed, running }) {
   return paintRow(COLOR.statusBg, width, (segment, literal) => {
     const hint = mode === 'view'
-      ? '[r] run  [e] edit  [s] select  [p] params  [q] quit'
-      : '[\u2191/\u2193 j/k] navigate  [ENTER] view  [p] params  [q] quit';
+      ? '[r] run  [e] edit  [s] select  [a] add  [p] params  [q] quit'
+      : '[\u2191/\u2193 j/k] navigate  [ENTER] view  [a] add  [p] params  [q] quit';
     const left = `${literal(' ')}${segment(COLOR.statusDim, hint)}`;
 
     const rightParts = [];
@@ -167,6 +181,7 @@ function askOnTty({ input, output }, question) {
 
 export async function runEvalTui(context, ttyHandle) {
   const { input, output } = ttyHandle;
+  const sessionStartedAt = Date.now();
   let database = (await askOnTty(ttyHandle, `Select a database or press ENTER for default [${context.environment.content_db}]: `)) || context.environment.content_db;
   const modules = (await askOnTty(ttyHandle, `Select a modules db or press ENTER for default [${context.environment.modules_db}]: `)) || context.environment.modules_db;
 
@@ -273,6 +288,47 @@ export async function runEvalTui(context, ttyHandle) {
     draw();
   };
 
+  const addScript = async () => {
+    suspendForExternalIO();
+    const name = await askOnTty(ttyHandle, `New script filename (.${SCRIPT_EXTENSIONS.join(', .')}): `);
+    let message = null;
+    if (name) {
+      if (!isSupportedScriptFile(name)) {
+        message = `Not created: "${name}" needs one of these extensions: .${SCRIPT_EXTENSIONS.join(', .')}`;
+      } else if (fs.existsSync(name)) {
+        message = `Not created: "${name}" already exists.`;
+      } else {
+        try {
+          fs.writeFileSync(name, '');
+        } catch (error) {
+          message = `Could not create "${name}": ${error.message}`;
+        }
+      }
+    }
+
+    if (message) {
+      output.write(`${message}\n`);
+      await askOnTty(ttyHandle, 'Press ENTER to continue: ');
+    }
+
+    scripts = listScripts();
+    if (!message && name) {
+      selectedScript = name;
+      cursorIndex = clampCursor(scripts.indexOf(name), scripts.length);
+      contentMode = 'preview';
+      lastResult = null;
+      mode = 'view';
+    } else {
+      cursorIndex = clampCursor(cursorIndex, scripts.length);
+    }
+    resumeTui();
+    draw();
+
+    // A fresh empty file is only useful once it has content - jump straight
+    // into the editor for it.
+    if (!message && name) await editScript(name);
+  };
+
   let stopKeys = () => {};
 
   function startInput() {
@@ -281,6 +337,7 @@ export async function runEvalTui(context, ttyHandle) {
       if (key.ctrl && key.name === 'c') return finish();
       if (key.name === 'q') return finish();
       if (key.name === 'p') { await promptForParams(); return; }
+      if (key.name === 'a') { await addScript(); return; }
 
       if (mode === 'select') {
         if (key.name === 'up' || key.name === 'k') { cursorIndex = clampCursor(cursorIndex - 1, scripts.length); draw(); return; }
@@ -308,6 +365,7 @@ export async function runEvalTui(context, ttyHandle) {
     stopKeys();
     showCursor(output);
     exitAltScreen(output);
+    output.write(`${ansi.reset}\nEval session done (duration ${formatDuration(Date.now() - sessionStartedAt)}).\n`);
     resolveExit(0);
   }
 

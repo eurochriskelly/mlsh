@@ -6,7 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { parseEvalArgs, pairsToJson, resolveScript } from './commands/eval.js';
+import { isSupportedScriptFile, listScripts, parseEvalArgs, pairsToJson, resolveScript, SCRIPT_EXTENSIONS } from './commands/eval.js';
 import {
   buildContentBody,
   buildHeaderRow,
@@ -14,6 +14,7 @@ import {
   buildStatusLine,
   clampCursor,
   combineColumns,
+  formatDuration,
   sidebarWidthFor,
   sidebarWindow
 } from './commands/eval-tui.js';
@@ -124,6 +125,23 @@ try {
     const script = path.join(home, 'example.xqy');
     fs.writeFileSync(script, '1 + 1');
     assert.equal(resolveScript(path.join(home, 'example')), script);
+  });
+
+  test('isSupportedScriptFile/listScripts recognise .xqy, .js, .sjs, .sql, and .spl', () => {
+    assert.ok(isSupportedScriptFile('a.xqy'));
+    assert.ok(isSupportedScriptFile('a.js'));
+    assert.ok(isSupportedScriptFile('a.sjs'));
+    assert.ok(isSupportedScriptFile('a.sql'));
+    assert.ok(isSupportedScriptFile('a.spl'));
+    assert.ok(isSupportedScriptFile('A.XQY'));
+    assert.ok(!isSupportedScriptFile('a.txt'));
+    assert.deepEqual(SCRIPT_EXTENSIONS, ['xqy', 'js', 'sjs', 'sql', 'spl']);
+
+    const directory = fs.mkdtempSync(path.join(home, 'scripts-'));
+    for (const file of ['one.xqy', 'two.js', 'three.sjs', 'four.sql', 'five.spl', 'ignored.txt']) {
+      fs.writeFileSync(path.join(directory, file), '');
+    }
+    assert.deepEqual(listScripts(directory), ['five.spl', 'four.sql', 'one.xqy', 'three.sjs', 'two.js']);
   });
 
   test('normalises module patterns and parses server records', () => {
@@ -278,14 +296,14 @@ try {
     assert.match(stripAnsi(selectLine), /navigate/);
     assert.match(stripAnsi(selectLine), /ENTER.*view/);
 
-    const viewLine = buildStatusLine({ width: 90, mode: 'view', lastScript: 'clear.xqy', database: 'FS-content', elapsed: '0.42' });
+    const viewLine = buildStatusLine({ width: 120, mode: 'view', lastScript: 'clear.xqy', database: 'FS-content', elapsed: '0.42' });
     const plain = stripAnsi(viewLine);
     assert.match(plain, /run/);
     assert.match(plain, /edit/);
     assert.match(plain, /clear\.xqy/);
     assert.match(plain, /db:FS-content/);
     assert.match(plain, /0\.42s/);
-    assert.equal(visibleLength(viewLine), 90);
+    assert.equal(visibleLength(viewLine), 120);
   });
 
   test('eval-tui: sidebarWidthFor grows with the longest filename but stays capped', () => {
@@ -293,6 +311,14 @@ try {
     assert.ok(narrow >= 18);
     const wide = sidebarWidthFor(['a-very-long-descriptive-script-name-indeed.xqy'], 100);
     assert.ok(wide <= Math.floor(100 * 0.35));
+  });
+
+  test('eval-tui: formatDuration renders seconds, minutes, and hours appropriately', () => {
+    assert.equal(formatDuration(45000), '45s');
+    assert.equal(formatDuration(1392000), '23m12s');
+    assert.equal(formatDuration(3723000), '1h2m3s');
+    assert.equal(formatDuration(0), '0s');
+    assert.equal(formatDuration(-500), '0s');
   });
 
   test('reuses the newest valid module workspace when today has none', () => {

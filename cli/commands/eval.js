@@ -119,8 +119,18 @@ async function evaluateFile(context, script, database, params, { quiet = false, 
   return { code: 0, response: result.response };
 }
 
+// Extensions the eval TUI/CLI treats as runnable scripts. Kept as a single
+// source of truth so `listScripts()` (what shows up to run) and the "add a
+// new script" flow (what's allowed to be created) never drift apart.
+export const SCRIPT_EXTENSIONS = ['xqy', 'js', 'sjs', 'sql', 'spl'];
+const SCRIPT_EXTENSION_PATTERN = new RegExp(`\\.(${SCRIPT_EXTENSIONS.join('|')})$`, 'i');
+
+export function isSupportedScriptFile(file) {
+  return SCRIPT_EXTENSION_PATTERN.test(file);
+}
+
 export function listScripts(cwd = process.cwd()) {
-  return fs.readdirSync(cwd).filter(file => /\.(xqy|s?js)$/i.test(file)).sort();
+  return fs.readdirSync(cwd).filter(isSupportedScriptFile).sort();
 }
 
 export function databaseOverride(script, fallback) {

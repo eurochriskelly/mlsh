@@ -65,6 +65,29 @@ export function size(output = process.stdout) {
   };
 }
 
+// process.stdout/stderr automatically stay in sync with the terminal's size
+// because Node's bootstrap code wires a SIGWINCH listener specifically for
+// those two singletons. A `tty.WriteStream` we construct ourselves (e.g. via
+// openControllingTty()) only queries the window size once at construction
+// time and is never refreshed - so without this, a TUI rendered to such a
+// stream would appear "stuck" at its original size no matter how the
+// terminal (or tmux pane) is resized afterwards. This re-queries the size on
+// SIGWINCH and emits 'resize' (via the stream's own _refreshSize) so existing
+// `output.on('resize', ...)` listeners keep working unchanged. Returns a
+// cleanup function that removes the signal listener.
+export function watchResize(output, onResize) {
+  const handleSignal = () => {
+    if (typeof output._refreshSize === 'function') output._refreshSize();
+    else if (onResize) onResize();
+  };
+  if (onResize) output.on('resize', onResize);
+  process.on('SIGWINCH', handleSignal);
+  return () => {
+    process.off('SIGWINCH', handleSignal);
+    if (onResize) output.off('resize', onResize);
+  };
+}
+
 export function fg(code, text) {
   return `${ESC}[38;5;${code}m${text}${ansi.reset}`;
 }

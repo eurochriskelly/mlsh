@@ -13,7 +13,8 @@ import {
   showCursor,
   size,
   startKeypresses,
-  visibleLength
+  visibleLength,
+  watchResize
 } from '../lib/tui.js';
 import { databaseOverride, formatDisplay, listScripts, performEval, prepareScript } from './eval.js';
 
@@ -310,11 +311,11 @@ export async function runEvalTui(context, ttyHandle) {
     resolveExit(0);
   }
 
-  output.on('resize', draw);
+  const stopResizeWatch = watchResize(output, draw);
   startInput();
   draw();
 
   const code = await exitPromise;
-  output.off('resize', draw);
+  stopResizeWatch();
   return code;
 }

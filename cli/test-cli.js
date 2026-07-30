@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from 'assert/strict';
+import { EventEmitter } from 'events';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -16,7 +17,7 @@ import {
   sidebarWidthFor,
   sidebarWindow
 } from './commands/eval-tui.js';
-import { openControllingTty, paintRow, padTo, truncateVisible, visibleLength } from './lib/tui.js';
+import { openControllingTty, paintRow, padTo, truncateVisible, visibleLength, watchResize } from './lib/tui.js';
 import { mlcpConnectionArgs } from './commands/external.js';
 import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
 import { createContext } from './main.js';
@@ -167,6 +168,42 @@ try {
     // no controlling terminal available, so this must return null rather than
     // throwing - that's exactly the fallback path non-interactive usage relies on.
     assert.doesNotThrow(() => openControllingTty());
+  });
+
+  test('tui: watchResize refreshes a custom tty stream on SIGWINCH and redraws when size changes', () => {
+    // A tty.WriteStream built from a raw fd (as openControllingTty() does)
+    // never auto-updates its .columns/.rows on resize - unlike process.stdout,
+    // nothing wires SIGWINCH to it. watchResize must do that wiring itself by
+    // calling the stream's own _refreshSize(), which re-queries the size and
+    // emits 'resize' only if it actually changed.
+    let redraws = 0;
+    const fakeOutput = new EventEmitter();
+    fakeOutput.columns = 80;
+    fakeOutput.rows = 24;
+    fakeOutput._refreshSize = () => {
+      fakeOutput.columns = 120;
+      fakeOutput.rows = 40;
+      fakeOutput.emit('resize');
+    };
+
+    const stop = watchResize(fakeOutput, () => { redraws++; });
+    process.emit('SIGWINCH');
+    assert.equal(redraws, 1);
+    assert.equal(fakeOutput.columns, 120);
+    assert.equal(fakeOutput.rows, 40);
+
+    stop();
+    process.emit('SIGWINCH');
+    assert.equal(redraws, 1, 'stop() should remove the SIGWINCH listener');
+  });
+
+  test('tui: watchResize falls back to calling onResize directly when the stream has no _refreshSize', () => {
+    let redraws = 0;
+    const fakeOutput = new EventEmitter();
+    const stop = watchResize(fakeOutput, () => { redraws++; });
+    process.emit('SIGWINCH');
+    assert.equal(redraws, 1);
+    stop();
   });
 
   test('eval-tui: clampCursor keeps the cursor within bounds', () => {

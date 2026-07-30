@@ -7,7 +7,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { parseEvalArgs, pairsToJson, resolveScript } from './commands/eval.js';
 import { buildScriptBar, buildStatusLine, resolveSelection } from './commands/eval-tui.js';
-import { paintRow, padTo, truncateVisible, visibleLength } from './lib/tui.js';
+import { openControllingTty, paintRow, padTo, truncateVisible, visibleLength } from './lib/tui.js';
 import { mlcpConnectionArgs } from './commands/external.js';
 import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
 import { createContext } from './main.js';
@@ -151,6 +151,13 @@ try {
     assert.equal(visibleLength(row), 10);
     assert.match(stripAnsi(row), /^hi {8}$/);
     assert.match(row, /48;5;236/);
+  });
+
+  test('tui: openControllingTty degrades gracefully with no controlling terminal', () => {
+    // In CI/sandboxed environments (and under `npm test`), there is typically
+    // no controlling terminal available, so this must return null rather than
+    // throwing - that's exactly the fallback path non-interactive usage relies on.
+    assert.doesNotThrow(() => openControllingTty());
   });
 
   test('eval-tui: resolveSelection maps a digit buffer to the matching script', () => {

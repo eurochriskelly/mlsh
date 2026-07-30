@@ -1,4 +1,6 @@
+import fs from 'fs';
 import readline from 'readline';
+import tty from 'tty';
 
 const ESC = '\x1b';
 
@@ -12,26 +14,54 @@ export const ansi = {
   reset: `${ESC}[0m`
 };
 
-export function enterAltScreen() {
-  process.stdout.write(ansi.altScreenOn);
+// Commands like `mlsh eval` are usually invoked through the interactive
+// shell's `mlsh_run` wrapper, which pipes stdout through `tee` for session
+// logging (see shell/bashrc). That makes `process.stdout.isTTY` false even
+// though a real terminal is right there. To get full-screen control
+// regardless of any such piping, open the controlling terminal directly via
+// /dev/tty and use that for both input and output. Returns null if no
+// controlling terminal is available (e.g. fully non-interactive/CI usage).
+export function openControllingTty() {
+  let fd;
+  try {
+    fd = fs.openSync('/dev/tty', 'r+');
+  } catch {
+    return null;
+  }
+  try {
+    const input = new tty.ReadStream(fd);
+    const output = new tty.WriteStream(fd);
+    if (!input.isTTY || !output.isTTY) return null;
+    return { input, output };
+  } catch {
+    return null;
+  }
 }
 
-export function exitAltScreen() {
-  process.stdout.write(ansi.altScreenOff);
+export function enterAltScreen(output = process.stdout) {
+  output.write(ansi.altScreenOn);
 }
 
-export function hideCursor() {
-  process.stdout.write(ansi.cursorHide);
+export function exitAltScreen(output = process.stdout) {
+  output.write(ansi.altScreenOff);
 }
 
-export function showCursor() {
-  process.stdout.write(ansi.cursorShow);
+export function hideCursor(output = process.stdout) {
+  output.write(ansi.cursorHide);
 }
 
-export function size() {
+export function showCursor(output = process.stdout) {
+  output.write(ansi.cursorShow);
+}
+
+export function clearScreen(output = process.stdout) {
+  output.write(ansi.clearScreen);
+}
+
+export function size(output = process.stdout) {
   return {
-    columns: process.stdout.columns || 80,
-    rows: process.stdout.rows || 24
+    columns: output.columns || 80,
+    rows: output.rows || 24
   };
 }
 
@@ -66,7 +96,7 @@ export function paintRow(bgCode, width, build) {
   const literal = (text) => `${ESC}[48;5;${bgCode}m${text}`;
   let content = build(segment, literal);
   const visible = visibleLength(content);
-  if (width && visible > width) content = truncateVisible(content, width) ;
+  if (width && visible > width) content = truncateVisible(content, width);
   const padded = visible < width ? content + ' '.repeat(width - visible) : content;
   return `${ESC}[48;5;${bgCode}m${padded}${ansi.reset}`;
 }
@@ -97,26 +127,26 @@ export function padTo(text, width, padStyle = (value) => value) {
   return text + padStyle(' '.repeat(width - visible));
 }
 
-let keypressActive = false;
+const activeKeypressStreams = new Set();
 
-export function startKeypresses(onKey) {
-  if (keypressActive) throw new Error('Keypress handling already active.');
-  keypressActive = true;
-  readline.emitKeypressEvents(process.stdin);
-  if (process.stdin.isTTY) process.stdin.setRawMode(true);
-  process.stdin.resume();
+export function startKeypresses(onKey, input = process.stdin) {
+  if (activeKeypressStreams.has(input)) throw new Error('Keypress handling already active for this stream.');
+  activeKeypressStreams.add(input);
+  readline.emitKeypressEvents(input);
+  if (input.isTTY) input.setRawMode(true);
+  input.resume();
   const listener = (chunk, key) => onKey(chunk, key);
-  process.stdin.on('keypress', listener);
+  input.on('keypress', listener);
   return () => {
-    process.stdin.off('keypress', listener);
-    if (process.stdin.isTTY) process.stdin.setRawMode(false);
-    process.stdin.pause();
-    keypressActive = false;
+    input.off('keypress', listener);
+    if (input.isTTY) input.setRawMode(false);
+    input.pause();
+    activeKeypressStreams.delete(input);
   };
 }
 
 // Writes a full frame (array of lines) in one write, homing the cursor first
 // to avoid flicker/partial redraws.
-export function renderFrame(lines) {
-  process.stdout.write(ansi.cursorHome + lines.join('\r\n'));
+export function renderFrame(lines, output = process.stdout) {
+  output.write(ansi.cursorHome + lines.join('\r\n'));
 }

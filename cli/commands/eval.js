@@ -187,9 +187,15 @@ export async function runEval(context, args, options = {}) {
   const parsed = parseEvalArgs(args);
   if (parsed.help) return showHelp('eval');
   if (!parsed.script) {
-    if (process.stdin.isTTY && process.stdout.isTTY) {
+    // Don't rely on process.stdout.isTTY here: mlsh's interactive shell pipes
+    // stdout through `tee` for session logging (see shell/bashrc), so stdout
+    // is a pipe even when there's a perfectly good terminal available. Open
+    // the controlling terminal directly to make that determination instead.
+    const { openControllingTty } = await import('../lib/tui.js');
+    const controllingTty = openControllingTty();
+    if (controllingTty) {
       const { runEvalTui } = await import('./eval-tui.js');
-      return runEvalTui(context);
+      return runEvalTui(context, controllingTty);
     }
     return lineBasedInteractiveEval(context);
   }

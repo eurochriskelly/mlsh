@@ -1,11 +1,10 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { ask } from '../lib/prompt.js';
-import { edit } from '../lib/editor.js';
+import readline from 'readline';
+import { editOnTty } from '../lib/editor.js';
 import {
   ansi,
-  dim,
   enterAltScreen,
   exitAltScreen,
   hideCursor,
@@ -108,9 +107,23 @@ function buildResultLines({ width, height, result, placeholder }) {
   return lines;
 }
 
-export async function runEvalTui(context) {
-  let database = (await ask(`Select a database or press ENTER for default [${context.environment.content_db}]: `)) || context.environment.content_db;
-  const modules = (await ask(`Select a modules db or press ENTER for default [${context.environment.modules_db}]: `)) || context.environment.modules_db;
+// A plain question prompt against the controlling terminal directly, so it
+// works correctly regardless of how the parent process's own stdio is wired
+// (mlsh's interactive shell pipes stdout through `tee` for session logging).
+function askOnTty({ input, output }, question) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input, output });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+export async function runEvalTui(context, ttyHandle) {
+  const { input, output } = ttyHandle;
+  let database = (await askOnTty(ttyHandle, `Select a database or press ENTER for default [${context.environment.content_db}]: `)) || context.environment.content_db;
+  const modules = (await askOnTty(ttyHandle, `Select a modules db or press ENTER for default [${context.environment.modules_db}]: `)) || context.environment.modules_db;
 
   let scripts = listScripts();
   let lastScript = '';
@@ -120,12 +133,12 @@ export async function runEvalTui(context) {
   let editArmed = false;
   let running = false;
 
-  enterAltScreen();
-  hideCursor();
-  process.stdout.write(ansi.clearScreen);
+  enterAltScreen(output);
+  hideCursor(output);
+  output.write(ansi.clearScreen);
 
   const draw = () => {
-    const { columns, rows } = size();
+    const { columns, rows } = size(output);
     const resultHeight = Math.max(1, rows - 2);
     const bar = buildScriptBar(scripts, { width: columns, selected: lastScript });
     const result = buildResultLines({
@@ -142,7 +155,7 @@ export async function runEvalTui(context) {
       database,
       elapsed: lastResult?.elapsed
     });
-    renderFrame([bar, ...result, status]);
+    renderFrame([bar, ...result, status], output);
   };
 
   let resolveExit;
@@ -167,21 +180,21 @@ export async function runEvalTui(context) {
 
   const suspendForExternalIO = () => {
     stopKeys();
-    showCursor();
-    exitAltScreen();
+    showCursor(output);
+    exitAltScreen(output);
   };
 
   const resumeTui = () => {
-    enterAltScreen();
-    hideCursor();
-    process.stdout.write(ansi.clearScreen);
+    enterAltScreen(output);
+    hideCursor(output);
+    output.write(ansi.clearScreen);
     startInput();
   };
 
   const promptForParams = async () => {
     suspendForExternalIO();
-    const input = await ask('Params (key=value&key2=value2), ENTER to clear: ');
-    lastParams = input || '';
+    const answer = await askOnTty(ttyHandle, 'Params (key=value&key2=value2), ENTER to clear: ');
+    lastParams = answer || '';
     resumeTui();
     draw();
   };
@@ -189,7 +202,7 @@ export async function runEvalTui(context) {
   const editScript = async (script) => {
     suspendForExternalIO();
     try {
-      edit(script);
+      editOnTty(script);
     } catch {
       // Editor failures aren't fatal to the TUI session; the user can retry.
     }
@@ -227,21 +240,21 @@ export async function runEvalTui(context) {
         await runScript(script);
         return;
       }
-    });
+    }, input);
   }
 
   function finish() {
     stopKeys();
-    showCursor();
-    exitAltScreen();
+    showCursor(output);
+    exitAltScreen(output);
     resolveExit(0);
   }
 
-  process.stdout.on('resize', draw);
+  output.on('resize', draw);
   startInput();
   draw();
 
   const code = await exitPromise;
-  process.stdout.off('resize', draw);
+  output.off('resize', draw);
   return code;
 }

@@ -18,11 +18,14 @@ import {
 import { databaseOverride, formatDisplay, listScripts, performEval, prepareScript } from './eval.js';
 
 const COLOR = {
-  barBg: 236,
-  barNumber: 220,
-  barDivider: 240,
-  barFile: 253,
-  barSelectedFile: 82,
+  sidebarBg: 235,
+  sidebarHeader: 141,
+  sidebarActiveBg: 24,
+  sidebarActiveFg: 231,
+  sidebarFile: 253,
+  headerBg: 235,
+  headerAccent: 116,
+  headerDim: 244,
   resultBg: 234,
   resultOk: 253,
   resultError: 203,
@@ -31,66 +34,110 @@ const COLOR = {
   statusAccent: 116
 };
 
-// Builds the compact "1:foo.xqy│2:bar.js" bar. Pure function so it's testable
-// without a real terminal. `width` is the visible column budget (bar background
-// fills the rest); `selected` is the currently-selected/last-run script name.
-export function buildScriptBar(scripts, { width = 80, selected } = {}) {
-  return paintRow(COLOR.barBg, width, (segment, literal) => {
-    if (!scripts.length) return segment(COLOR.statusDim, ' No .xqy/.js/.sjs scripts in this directory ');
-    const parts = [literal(' ')];
-    scripts.forEach((file, index) => {
-      if (index > 0) parts.push(segment(COLOR.barDivider, '│'));
-      const fileColor = file === selected ? COLOR.barSelectedFile : COLOR.barFile;
-      parts.push(segment(COLOR.barNumber, String(index + 1)));
-      parts.push(segment(COLOR.barDivider, ':'));
-      parts.push(segment(fileColor, file));
+const MIN_SIDEBAR_WIDTH = 18;
+const MAX_SIDEBAR_FRACTION = 0.35;
+
+export function sidebarWidthFor(scripts, columns) {
+  const longest = scripts.reduce((max, file) => Math.max(max, file.length), 0);
+  const desired = longest + 6; // marker + spacing + filename
+  const cap = Math.max(MIN_SIDEBAR_WIDTH, Math.floor(columns * MAX_SIDEBAR_FRACTION));
+  return Math.max(MIN_SIDEBAR_WIDTH, Math.min(desired, cap));
+}
+
+// Clamps a cursor index into [0, length-1] (or 0 for an empty list). Pure + testable.
+export function clampCursor(index, length) {
+  if (length <= 0) return 0;
+  return Math.max(0, Math.min(index, length - 1));
+}
+
+// Computes the scrolling window of scripts to show so the cursor stays
+// visible within `visibleCount` rows. Pure + testable.
+export function sidebarWindow(scripts, cursorIndex, visibleCount) {
+  if (scripts.length <= visibleCount) return { start: 0, items: scripts };
+  let start = 0;
+  if (cursorIndex >= visibleCount) start = cursorIndex - visibleCount + 1;
+  start = Math.min(start, scripts.length - visibleCount);
+  return { start, items: scripts.slice(start, start + visibleCount) };
+}
+
+// Renders the sidebar's scrollable list body (not including its header row).
+// Pure function returning `height` full-width painted strings.
+export function buildSidebarBody(scripts, { cursorIndex = 0, width = 24, height = 10 } = {}) {
+  const rows = [];
+  if (!scripts.length) {
+    rows.push(paintRow(COLOR.sidebarBg, width, (segment) => segment(COLOR.statusDim, ' (no scripts here) ')));
+  } else {
+    const { start, items } = sidebarWindow(scripts, cursorIndex, height);
+    items.forEach((file, offset) => {
+      const actualIndex = start + offset;
+      const isCursor = actualIndex === cursorIndex;
+      const bg = isCursor ? COLOR.sidebarActiveBg : COLOR.sidebarBg;
+      const fg = isCursor ? COLOR.sidebarActiveFg : COLOR.sidebarFile;
+      rows.push(paintRow(bg, width, (segment, literal) => `${literal(' ')}${segment(fg, `${isCursor ? '›' : ' '} ${file}`)}`));
     });
-    parts.push(literal(' '));
-    return parts.join('');
-  });
-}
-
-// Resolves a digit-buffer string (e.g. "12") to a script name, or null if the
-// buffer is empty/out of range. Pure + testable.
-export function resolveSelection(buffer, scripts) {
-  if (!buffer) return null;
-  const index = Number(buffer) - 1;
-  return scripts[index] || null;
-}
-
-// Decides whether a digit buffer is unambiguous and should fire immediately
-// rather than waiting for more digits (or Enter). It's unambiguous as soon as
-// no valid script index has `buffer` as a strict prefix with *more* digits -
-// e.g. with 15 scripts, buffer "1" is ambiguous (could become "10".."15"), but
-// buffer "2".."9" is immediate (no valid two-digit script starts with them).
-// Pure + testable.
-export function resolveImmediate(buffer, scripts) {
-  if (!buffer) return false;
-  const total = scripts.length;
-  if (total === 0) return true;
-  for (let index = 1; index <= total; index++) {
-    const text = String(index);
-    if (text.length > buffer.length && text.startsWith(buffer)) return false;
   }
-  return true;
+  while (rows.length < height) rows.push(paintRow(COLOR.sidebarBg, width, () => ''));
+  return rows.slice(0, height);
 }
 
-const SELECTION_DEBOUNCE_MS = 300;
+// Renders the content pane's body (not including its header row): either a
+// navigation placeholder, a script source preview, or the last run's result.
+// Pure function returning `height` full-width painted strings.
+export function buildContentBody({ width, height, mode, previewText, result, running }) {
+  let bodyLines;
+  let isError = false;
+  if (running) bodyLines = ['Running…'];
+  else if (mode === 'result') {
+    if (!result) bodyLines = ['No result yet. Press r to run.'];
+    else if (!result.ok) { bodyLines = result.message.split(/\r?\n/); isError = true; }
+    else {
+      const display = formatDisplay(result.response);
+      bodyLines = display ? display.split(/\r?\n/) : ['(empty result)'];
+    }
+  } else if (mode === 'preview') {
+    bodyLines = previewText ? previewText.split(/\r?\n/) : ['(empty file)'];
+  } else {
+    bodyLines = ['Navigate with \u2191/\u2193 or j/k, press ENTER to view a script.'];
+  }
 
-export function buildStatusLine({ width = 80, editArmed, buffer, lastScript, database, elapsed }) {
+  const truncated = bodyLines.length > height;
+  const visible = bodyLines.slice(0, height - (truncated ? 1 : 0));
+  const fgColor = isError ? COLOR.resultError : COLOR.resultOk;
+
+  const lines = visible.map((raw) => paintRow(COLOR.resultBg, width, (segment, literal) => `${literal(' ')}${segment(fgColor, raw)}`));
+  if (truncated) {
+    lines.push(paintRow(COLOR.resultBg, width, (segment, literal) => `${literal(' ')}${segment(COLOR.statusDim, `[+${bodyLines.length - visible.length} more lines]`)}`));
+  }
+  while (lines.length < height) lines.push(paintRow(COLOR.resultBg, width, () => ''));
+  return lines;
+}
+
+// Builds the single top header row, split between the sidebar column
+// ("SCRIPTS") and the content column (current script + mode, or a hint).
+// Pure function returning one full-width painted string.
+export function buildHeaderRow({ totalWidth, sidebarWidth, selectedScript, mode }) {
+  const sidebarHeader = paintRow(COLOR.sidebarBg, sidebarWidth, (segment) => segment(COLOR.sidebarHeader, ' SCRIPTS'));
+  const contentWidth = Math.max(0, totalWidth - sidebarWidth);
+  const label = selectedScript ? `${selectedScript}${mode === 'result' ? ' · result' : ' · preview'}` : 'Select a script';
+  const contentHeader = paintRow(COLOR.headerBg, contentWidth, (segment) => segment(COLOR.headerAccent, ` ${label}`));
+  return sidebarHeader + contentHeader;
+}
+
+// Concatenates two equal-length arrays of same-height painted rows into full
+// combined rows (sidebar column beside content column). Pure + testable.
+export function combineColumns(leftRows, rightRows) {
+  return leftRows.map((left, index) => left + (rightRows[index] || ''));
+}
+
+export function buildStatusLine({ width = 80, mode, lastScript, database, elapsed, running }) {
   return paintRow(COLOR.statusBg, width, (segment, literal) => {
-    const modeText = editArmed ? 'EDIT' : 'RUN';
-    const modeColor = editArmed ? COLOR.resultError : COLOR.statusAccent;
-    const bufferLabel = buffer ? ` #${buffer}` : '';
-    const left = [
-      literal(' '),
-      segment(modeColor, modeText),
-      segment(COLOR.statusDim, bufferLabel),
-      literal('  '),
-      segment(COLOR.statusDim, '[1-9] run  [e] edit  [p] params  [q] quit')
-    ].join('');
+    const hint = mode === 'view'
+      ? '[r] run  [e] edit  [s] select  [p] params  [q] quit'
+      : '[\u2191/\u2193 j/k] navigate  [ENTER] view  [p] params  [q] quit';
+    const left = `${literal(' ')}${segment(COLOR.statusDim, hint)}`;
 
     const rightParts = [];
+    if (running) rightParts.push('running…');
     if (lastScript) rightParts.push(lastScript);
     if (database) rightParts.push(`db:${database}`);
     if (elapsed !== undefined && elapsed !== null) rightParts.push(`${elapsed}s`);
@@ -102,28 +149,6 @@ export function buildStatusLine({ width = 80, editArmed, buffer, lastScript, dat
     const gap = Math.max(1, width - leftVisible - rightVisible);
     return left + literal(' '.repeat(gap)) + right;
   });
-}
-
-function buildResultLines({ width, height, result, placeholder }) {
-  let bodyLines;
-  if (!result) bodyLines = [placeholder];
-  else if (!result.ok) bodyLines = result.message.split(/\r?\n/);
-  else {
-    const display = formatDisplay(result.response);
-    bodyLines = display ? display.split(/\r?\n/) : ['(empty result)'];
-  }
-
-  const truncated = bodyLines.length > height;
-  const visible = bodyLines.slice(0, height - (truncated ? 1 : 0));
-  const isError = result && !result.ok;
-  const fgColor = isError ? COLOR.resultError : COLOR.resultOk;
-
-  const lines = visible.map((raw) => paintRow(COLOR.resultBg, width, (segment, literal) => `${literal(' ')}${segment(fgColor, raw)}`));
-  if (truncated) {
-    lines.push(paintRow(COLOR.resultBg, width, (segment, literal) => `${literal(' ')}${segment(COLOR.statusDim, `[+${bodyLines.length - visible.length} more lines]`)}`));
-  }
-  while (lines.length < height) lines.push(paintRow(COLOR.resultBg, width, () => ''));
-  return lines;
 }
 
 // A plain question prompt against the controlling terminal directly, so it
@@ -145,11 +170,12 @@ export async function runEvalTui(context, ttyHandle) {
   const modules = (await askOnTty(ttyHandle, `Select a modules db or press ENTER for default [${context.environment.modules_db}]: `)) || context.environment.modules_db;
 
   let scripts = listScripts();
-  let lastScript = '';
+  let cursorIndex = 0;
+  let mode = 'select'; // 'select' (sidebar navigation) | 'view' (script chosen: preview/result)
+  let contentMode = 'empty'; // 'empty' | 'preview' | 'result'
+  let selectedScript = '';
   let lastParams = '';
   let lastResult = null;
-  let buffer = '';
-  let editArmed = false;
   let running = false;
 
   enterAltScreen(output);
@@ -158,32 +184,47 @@ export async function runEvalTui(context, ttyHandle) {
 
   const draw = () => {
     const { columns, rows } = size(output);
-    const resultHeight = Math.max(1, rows - 2);
-    const bar = buildScriptBar(scripts, { width: columns, selected: lastScript });
-    const result = buildResultLines({
-      width: columns,
-      height: resultHeight,
+    const sidebarWidth = sidebarWidthFor(scripts, columns);
+    const contentWidth = Math.max(1, columns - sidebarWidth);
+    const bodyHeight = Math.max(1, rows - 2);
+
+    const header = buildHeaderRow({ totalWidth: columns, sidebarWidth, selectedScript, mode: contentMode });
+    const sidebarBody = buildSidebarBody(scripts, { cursorIndex, width: sidebarWidth, height: bodyHeight });
+    const contentBody = buildContentBody({
+      width: contentWidth,
+      height: bodyHeight,
+      mode: contentMode,
+      previewText: contentMode === 'preview' && selectedScript ? readPreview(selectedScript) : '',
       result: lastResult,
-      placeholder: running ? 'Running…' : 'Press a number to run a script.'
+      running
     });
+    const bodyRows = combineColumns(sidebarBody, contentBody);
     const status = buildStatusLine({
       width: columns,
-      editArmed,
-      buffer,
-      lastScript,
+      mode,
+      lastScript: selectedScript,
       database,
-      elapsed: lastResult?.elapsed
+      elapsed: lastResult?.elapsed,
+      running
     });
-    renderFrame([bar, ...result, status], output);
+    renderFrame([header, ...bodyRows, status], output);
   };
+
+  function readPreview(script) {
+    try {
+      return fs.readFileSync(script, 'utf8');
+    } catch (error) {
+      return `Could not read ${script}: ${error.message}`;
+    }
+  }
 
   let resolveExit;
   const exitPromise = new Promise((resolve) => { resolveExit = resolve; });
 
   const runScript = async (script) => {
-    lastScript = script;
     database = databaseOverride(script, database);
     running = true;
+    contentMode = 'result';
     draw();
     const { prepared, cleanup } = prepareScript(script, database, modules);
     try {
@@ -226,68 +267,43 @@ export async function runEvalTui(context, ttyHandle) {
       // Editor failures aren't fatal to the TUI session; the user can retry.
     }
     scripts = listScripts();
+    cursorIndex = clampCursor(cursorIndex, scripts.length);
     resumeTui();
     draw();
   };
 
   let stopKeys = () => {};
-  let debounceTimer = null;
-
-  const clearDebounce = () => {
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-      debounceTimer = null;
-    }
-  };
-
-  // Resolves the current buffer (running the script or opening it for edit,
-  // depending on mode), then clears the buffer/timer. Used by both immediate
-  // single-key selection and the debounce timeout/Enter fallback.
-  const selectAndAct = async (value) => {
-    clearDebounce();
-    const script = resolveSelection(value, scripts);
-    buffer = '';
-    if (!script) { draw(); return; }
-    if (editArmed) {
-      editArmed = false;
-      await editScript(script);
-      return;
-    }
-    await runScript(script);
-  };
 
   function startInput() {
     stopKeys = startKeypresses(async (chunk, key) => {
       if (!key) return;
       if (key.ctrl && key.name === 'c') return finish();
-      if (key.name === 'q' && !editArmed) return finish();
-      if (key.name === 'e') { clearDebounce(); editArmed = true; buffer = ''; draw(); return; }
-      if (key.name === 'p') { clearDebounce(); await promptForParams(); return; }
-      if (key.name === 'backspace') { clearDebounce(); buffer = buffer.slice(0, -1); draw(); return; }
-      if (key.name === 'escape') { clearDebounce(); buffer = ''; editArmed = false; draw(); return; }
-      if (key.name >= '0' && key.name <= '9') {
-        clearDebounce();
-        buffer += key.name;
-        draw();
-        if (resolveImmediate(buffer, scripts)) await selectAndAct(buffer);
-        else debounceTimer = setTimeout(() => selectAndAct(buffer), SELECTION_DEBOUNCE_MS);
-        return;
-      }
-      if (key.name === 'return' || key.name === 'enter') {
-        clearDebounce();
-        if (!buffer) {
-          if (!editArmed && lastScript) await runScript(lastScript);
+      if (key.name === 'q') return finish();
+      if (key.name === 'p') { await promptForParams(); return; }
+
+      if (mode === 'select') {
+        if (key.name === 'up' || key.name === 'k') { cursorIndex = clampCursor(cursorIndex - 1, scripts.length); draw(); return; }
+        if (key.name === 'down' || key.name === 'j') { cursorIndex = clampCursor(cursorIndex + 1, scripts.length); draw(); return; }
+        if (key.name === 'return' || key.name === 'enter') {
+          if (!scripts.length) return;
+          selectedScript = scripts[cursorIndex];
+          contentMode = 'preview';
+          lastResult = null;
+          mode = 'view';
           draw();
           return;
         }
-        await selectAndAct(buffer);
         return;
       }
+
+      // mode === 'view'
+      if (key.name === 's' || key.name === 'escape') { mode = 'select'; draw(); return; }
+      if (key.name === 'r') { if (selectedScript) await runScript(selectedScript); return; }
+      if (key.name === 'e') { if (selectedScript) await editScript(selectedScript); return; }
     }, input);
   }
 
   function finish() {
-    clearDebounce();
     stopKeys();
     showCursor(output);
     exitAltScreen(output);

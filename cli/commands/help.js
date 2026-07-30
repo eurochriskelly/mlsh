@@ -11,9 +11,11 @@ Options:
 
 Running 'mlsh eval' with no script opens an interactive picker for scripts
 (.xqy, .js, .sjs) in the current directory. In a real terminal this is a
-full-screen view:
-  [1-9] run a script     [e] then a number to edit it ($EDITOR/nvim/vim/vi)
-  [p]   set query params [q] or Ctrl+C to quit`,
+full-screen navigator:
+  [\u2191/\u2193 j/k] browse scripts   [ENTER] view the selected script
+  [r] run             [e] edit it ($EDITOR/nvim/vim/vi)
+  [s] back to the script list         [p] set query params
+  [q] or Ctrl+C to quit`,
   modules: `Usage: mlsh modules {find <pattern>|new <pattern>|load|loadOne|clone|reset} [--workspace <directory>]
 
 Download modules for local editing and load them back into MarkLogic.

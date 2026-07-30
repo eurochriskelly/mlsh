@@ -6,7 +6,16 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { parseEvalArgs, pairsToJson, resolveScript } from './commands/eval.js';
-import { buildScriptBar, buildStatusLine, resolveImmediate, resolveSelection } from './commands/eval-tui.js';
+import {
+  buildContentBody,
+  buildHeaderRow,
+  buildSidebarBody,
+  buildStatusLine,
+  clampCursor,
+  combineColumns,
+  sidebarWidthFor,
+  sidebarWindow
+} from './commands/eval-tui.js';
 import { openControllingTty, paintRow, padTo, truncateVisible, visibleLength } from './lib/tui.js';
 import { mlcpConnectionArgs } from './commands/external.js';
 import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
@@ -160,69 +169,93 @@ try {
     assert.doesNotThrow(() => openControllingTty());
   });
 
-  test('eval-tui: resolveSelection maps a digit buffer to the matching script', () => {
-    const scripts = ['a.xqy', 'b.js', 'c.sjs'];
-    assert.equal(resolveSelection('1', scripts), 'a.xqy');
-    assert.equal(resolveSelection('3', scripts), 'c.sjs');
-    assert.equal(resolveSelection('9', scripts), null);
-    assert.equal(resolveSelection('', scripts), null);
+  test('eval-tui: clampCursor keeps the cursor within bounds', () => {
+    assert.equal(clampCursor(-1, 3), 0);
+    assert.equal(clampCursor(5, 3), 2);
+    assert.equal(clampCursor(1, 3), 1);
+    assert.equal(clampCursor(0, 0), 0);
   });
 
-  test('eval-tui: resolveImmediate fires immediately whenever a list has 9 or fewer scripts', () => {
-    const scripts = Array.from({ length: 3 }, (_, index) => `script${index + 1}.xqy`);
-    assert.equal(resolveImmediate('1', scripts), true);
-    assert.equal(resolveImmediate('2', scripts), true);
-    assert.equal(resolveImmediate('', scripts), false);
+  test('eval-tui: sidebarWindow returns the full list when it fits, otherwise scrolls to keep the cursor visible', () => {
+    const scripts = Array.from({ length: 5 }, (_, index) => `s${index + 1}.xqy`);
+    assert.deepEqual(sidebarWindow(scripts, 0, 10), { start: 0, items: scripts });
+
+    const windowed = sidebarWindow(scripts, 4, 3);
+    assert.equal(windowed.start, 2);
+    assert.deepEqual(windowed.items, ['s3.xqy', 's4.xqy', 's5.xqy']);
+
+    const atStart = sidebarWindow(scripts, 0, 3);
+    assert.equal(atStart.start, 0);
+    assert.deepEqual(atStart.items, ['s1.xqy', 's2.xqy', 's3.xqy']);
   });
 
-  test('eval-tui: resolveImmediate waits only when a longer selection is still possible', () => {
-    const scripts = Array.from({ length: 15 }, (_, index) => `script${index + 1}.xqy`);
-    // "1" could still become "10".."15" - ambiguous, must wait for more digits or a timeout/Enter.
-    assert.equal(resolveImmediate('1', scripts), false);
-    // "2".."9" can never be the start of a valid two-digit script (max is 15) - immediate.
-    assert.equal(resolveImmediate('2', scripts), true);
-    assert.equal(resolveImmediate('9', scripts), true);
-    // "12" is already two digits, the max any script index can have - immediate.
-    assert.equal(resolveImmediate('12', scripts), true);
+  test('eval-tui: combineColumns concatenates matching rows from two columns', () => {
+    assert.deepEqual(combineColumns(['a', 'b'], ['1', '2']), ['a1', 'b2']);
+    assert.deepEqual(combineColumns(['a'], []), ['a']);
   });
 
-  test('eval-tui: resolveImmediate fires immediately when there are no scripts', () => {
-    assert.equal(resolveImmediate('1', []), true);
+  test('eval-tui: buildSidebarBody highlights the cursor row and shows a placeholder when empty', () => {
+    const body = buildSidebarBody(['clear.xqy', 'stats.sjs'], { cursorIndex: 1, width: 30, height: 4 });
+    assert.equal(body.length, 4);
+    const plain = body.map(stripAnsi);
+    assert.match(plain[0], /clear\.xqy/);
+    assert.match(plain[1], /›.*stats\.sjs/);
+    body.forEach((row) => assert.equal(visibleLength(row), 30));
+
+    const empty = buildSidebarBody([], { width: 20, height: 2 });
+    assert.match(stripAnsi(empty[0]), /no scripts/);
   });
 
-  test('eval-tui: buildScriptBar renders a compact numbered list with dividers', () => {
-    const bar = buildScriptBar(['clear.xqy', 'stats.sjs'], { width: 40, selected: 'clear.xqy' });
-    const plain = stripAnsi(bar);
-    assert.match(plain, /1:clear\.xqy│2:stats\.sjs/);
-    assert.equal(visibleLength(bar), 40);
+  test('eval-tui: buildContentBody shows a navigation hint, a preview, or a result depending on mode', () => {
+    const empty = buildContentBody({ width: 40, height: 3, mode: 'empty' });
+    assert.match(stripAnsi(empty[0]), /Navigate with/);
+
+    const preview = buildContentBody({ width: 40, height: 3, mode: 'preview', previewText: 'xquery version "1.0-ml";\n1 + 1' });
+    assert.match(stripAnsi(preview[0]), /xquery version/);
+    assert.match(stripAnsi(preview[1]), /1 \+ 1/);
+
+    const okResult = buildContentBody({ width: 40, height: 3, mode: 'result', result: { ok: true, response: '2' } });
+    assert.match(stripAnsi(okResult[0]), /2/);
+
+    const errorResult = buildContentBody({ width: 40, height: 3, mode: 'result', result: { ok: false, message: 'boom' } });
+    assert.match(stripAnsi(errorResult[0]), /boom/);
+    assert.match(errorResult[0], new RegExp(`38;5;203`));
+
+    const running = buildContentBody({ width: 40, height: 3, mode: 'result', running: true });
+    assert.match(stripAnsi(running[0]), /Running/);
   });
 
-  test('eval-tui: buildScriptBar shows a placeholder when no scripts are present', () => {
-    const bar = buildScriptBar([], { width: 40 });
-    assert.match(stripAnsi(bar), /No \.xqy\/\.js\/\.sjs scripts/);
+  test('eval-tui: buildHeaderRow shows SCRIPTS plus the selected script and mode', () => {
+    const header = buildHeaderRow({ totalWidth: 60, sidebarWidth: 20, selectedScript: 'clear.xqy', mode: 'preview' });
+    const plain = stripAnsi(header);
+    assert.match(plain, /SCRIPTS/);
+    assert.match(plain, /clear\.xqy · preview/);
+    assert.equal(visibleLength(header), 60);
+
+    const none = buildHeaderRow({ totalWidth: 60, sidebarWidth: 20, selectedScript: '', mode: 'empty' });
+    assert.match(stripAnsi(none), /Select a script/);
   });
 
-  test('eval-tui: buildStatusLine shows mode, buffer, script, database, and elapsed time', () => {
-    const line = buildStatusLine({
-      width: 90,
-      editArmed: false,
-      buffer: '1',
-      lastScript: 'clear.xqy',
-      database: 'FS-content',
-      elapsed: '0.42'
-    });
-    const plain = stripAnsi(line);
-    assert.match(plain, /RUN/);
-    assert.match(plain, /#1/);
+  test('eval-tui: buildStatusLine shows different hints for select vs view mode', () => {
+    const selectLine = buildStatusLine({ width: 90, mode: 'select', lastScript: '', database: 'FS-content' });
+    assert.match(stripAnsi(selectLine), /navigate/);
+    assert.match(stripAnsi(selectLine), /ENTER.*view/);
+
+    const viewLine = buildStatusLine({ width: 90, mode: 'view', lastScript: 'clear.xqy', database: 'FS-content', elapsed: '0.42' });
+    const plain = stripAnsi(viewLine);
+    assert.match(plain, /run/);
+    assert.match(plain, /edit/);
     assert.match(plain, /clear\.xqy/);
     assert.match(plain, /db:FS-content/);
     assert.match(plain, /0\.42s/);
-    assert.equal(visibleLength(line), 90);
+    assert.equal(visibleLength(viewLine), 90);
   });
 
-  test('eval-tui: buildStatusLine shows EDIT mode when armed', () => {
-    const line = buildStatusLine({ width: 40, editArmed: true, buffer: '', lastScript: '', database: '', elapsed: null });
-    assert.match(stripAnsi(line), /EDIT/);
+  test('eval-tui: sidebarWidthFor grows with the longest filename but stays capped', () => {
+    const narrow = sidebarWidthFor(['a.xqy'], 100);
+    assert.ok(narrow >= 18);
+    const wide = sidebarWidthFor(['a-very-long-descriptive-script-name-indeed.xqy'], 100);
+    assert.ok(wide <= Math.floor(100 * 0.35));
   });
 
   test('reuses the newest valid module workspace when today has none', () => {

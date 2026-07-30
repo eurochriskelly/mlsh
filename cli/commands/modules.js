@@ -49,6 +49,14 @@ function hasModuleList(directory) {
   return fs.existsSync(path.join(directory, 'module-info.txt'));
 }
 
+function tryResolveModuleWorkspace(options) {
+  try {
+    return resolveModuleWorkspace(options);
+  } catch {
+    return null;
+  }
+}
+
 export function resolveModuleWorkspace({ cwd = process.cwd(), requested, date = today() } = {}) {
   const currentDirectory = path.resolve(cwd);
   if (requested) {
@@ -103,48 +111,71 @@ function parseModuleArgs(args) {
   return { positional, workspace };
 }
 
-async function findModules(context, suppliedPattern, requestedWorkspace) {
-  const pattern = suppliedPattern || await ask('Pattern to match (for example, *foo.xqy): ');
-  if (!pattern) throw new Error('No pattern given.');
-  const search = normalisePattern(pattern);
-  const limit = Number(process.env.MLSH_MODULE_FIND_LIMIT || 200);
-  const timeoutSeconds = Number(process.env.MLSH_MODULE_FIND_TIMEOUT || 90);
-  const concurrency = positiveInteger(process.env.MLSH_MODULE_CONCURRENCY, 4);
-  const modulesDatabase = context.environment.modules_db;
-  if (!modulesDatabase) throw new Error("No modules database configured. Run 'mlsh env' and set modules_db.");
+async function findModules(context, suppliedPattern, requestedWorkspace, forceNew = false) {
+   const pattern = suppliedPattern || await ask('Pattern to match (for example, *foo.xqy): ');
+   if (!pattern) throw new Error('No pattern given.');
+   const search = normalisePattern(pattern);
+   const limit = Number(process.env.MLSH_MODULE_FIND_LIMIT || 200);
+   const timeoutSeconds = Number(process.env.MLSH_MODULE_FIND_TIMEOUT || 90);
+   const concurrency = positiveInteger(process.env.MLSH_MODULE_CONCURRENCY, 4);
+   const modulesDatabase = context.environment.modules_db;
+   if (!modulesDatabase) throw new Error("No modules database configured. Run 'mlsh env' and set modules_db.");
 
-  const variables = JSON.stringify({ pattern: search, limit: String(limit), timeoutSeconds: String(timeoutSeconds), targetDatabase: modulesDatabase });
-  context.logger.info(`find pattern='${pattern}' normalised='${search}' target-db='${modulesDatabase}' eval-db='${context.environment.content_db}' limit=${limit} timeout=${timeoutSeconds}s`);
-  const evaluated = await evaluateBundled(
-    context,
-    path.join(context.topDir, 'scripts', 'eval', 'moduleLister.xqy'),
-    context.environment.content_db,
-    variables,
-    { capture: true }
-  );
-  if (evaluated.code !== 0) return evaluated.code;
+   const variables = JSON.stringify({ pattern: search, limit: String(limit), timeoutSeconds: String(timeoutSeconds), targetDatabase: modulesDatabase });
+   context.logger.info(`find pattern='${pattern}' normalised='${search}' target-db='${modulesDatabase}' eval-db='${context.environment.content_db}' limit=${limit} timeout=${timeoutSeconds}s`);
+   const evaluated = await evaluateBundled(
+     context,
+     path.join(context.topDir, 'scripts', 'eval', 'moduleLister.xqy'),
+     context.environment.content_db,
+     variables,
+     { capture: true }
+   );
+   if (evaluated.code !== 0) return evaluated.code;
 
-  const lines = evaluated.response.replace(/\r/g, '').split('\n');
-  const diagnostics = lines.filter(line => line.startsWith('MLSH-DIAG:')).map(line => line.slice('MLSH-DIAG:'.length));
-  diagnostics.forEach(line => context.logger.info(`server: ${line}`));
-  const records = lines.filter(line => line.includes('~') && line.endsWith('~EOL')).map(parseModuleRecord);
-  if (!records.length) {
-    console.log(`No modules match '${search}' in ${modulesDatabase}.`);
-    if (diagnostics.length) console.log(`Server diagnostics:\n${diagnostics.map(line => `  ${line}`).join('\n')}`);
-    console.log(`Details in ${context.logFile} (run 'debug on' for the full request/response).`);
-    return 0;
-  }
+   const lines = evaluated.response.replace(/\r/g, '').split('\n');
+   const diagnostics = lines.filter(line => line.startsWith('MLSH-DIAG:')).map(line => line.slice('MLSH-DIAG:'.length));
+   diagnostics.forEach(line => context.logger.info(`server: ${line}`));
+   const records = lines.filter(line => line.includes('~') && line.endsWith('~EOL')).map(parseModuleRecord);
+   if (!records.length) {
+     console.log(`No modules match '${search}' in ${modulesDatabase}.`);
+     if (diagnostics.length) console.log(`Server diagnostics:\n${diagnostics.map(line => `  ${line}`).join('\n')}`);
+     console.log(`Details in ${context.logFile} (run 'debug on' for the full request/response).`);
+     return 0;
+   }
 
-  console.log('Matching modules:');
-  records.forEach((record, index) => console.log(`  ${index + 1}. ${record.uri}`));
-  const choice = await ask('Numbers to download (for example, 1,3), ALL, or Enter to cancel: ');
-  if (!choice) return 0;
-  const selected = selectedItems(records, choice);
-  if (!selected.length) throw new Error('No valid module numbers selected.');
+   console.log('Matching modules:');
+   records.forEach((record, index) => console.log(`  ${index + 1}. ${record.uri}`));
+   const choice = await ask('Numbers to download (for example, 1,3), ALL, or Enter to cancel: ');
+   if (!choice) return 0;
+   const selected = selectedItems(records, choice);
+   if (!selected.length) throw new Error('No valid module numbers selected.');
 
-  const directory = requestedWorkspace ? path.resolve(requestedWorkspace) : datedModuleDirectory();
-  fs.mkdirSync(path.join(directory, 'originals'), { recursive: true });
-  fs.mkdirSync(path.join(directory, 'edited'), { recursive: true });
+   let directory;
+   let workspaceReason = 'new';
+   if (requestedWorkspace) {
+     directory = path.resolve(requestedWorkspace);
+   } else if (forceNew) {
+     directory = datedModuleDirectory();
+   } else {
+     const resolved = tryResolveModuleWorkspace({});
+     if (resolved) {
+       directory = resolved.directory;
+       workspaceReason = resolved.reason;
+     } else {
+       directory = datedModuleDirectory();
+     }
+   }
+   if (workspaceReason === 'latest') {
+     console.log(`Reusing latest module workspace: ${path.relative(process.cwd(), directory) || directory}`);
+   } else if (workspaceReason === 'today') {
+     console.log(`Reusing today's module workspace: ${path.relative(process.cwd(), directory) || directory}`);
+   } else if (workspaceReason === 'current-directory') {
+     console.log(`Reusing current module workspace: ${path.relative(process.cwd(), directory) || '.'}`);
+   } else if (workspaceReason === 'new') {
+     console.log(`Creating new module workspace: ${path.relative(process.cwd(), directory) || directory}`);
+   }
+   fs.mkdirSync(path.join(directory, 'originals'), { recursive: true });
+   fs.mkdirSync(path.join(directory, 'edited'), { recursive: true });
   const results = await mapLimit(selected, concurrency, async record => {
     const endpoint = `/v1/documents?uri=${encodeURIComponent(record.uri)}&database=${encodeURIComponent(modulesDatabase)}`;
     const response = await context.client.request(endpoint, ['-X', 'GET']);
@@ -237,7 +268,8 @@ export async function runModules(context, args) {
   const { positional, workspace } = parseModuleArgs(args);
   const command = positional[0];
   if (['-h', '--help'].includes(command) || !command) return showHelp('modules');
-  if (['find', 'retrieve', 'match', 'search'].includes(command)) return findModules(context, positional[1], workspace);
+  if (['find', 'retrieve', 'match', 'search'].includes(command)) return findModules(context, positional[1], workspace, false);
+  if (['new'].includes(command)) return findModules(context, positional[1], workspace, true);
   const selectedWorkspace = workspace || positional[1];
   if (['load', 'update'].includes(command)) return loadModules(context, '', selectedWorkspace);
   if (['loadOne', 'load-one'].includes(command)) return loadModules(context, 'one', selectedWorkspace);

@@ -8,9 +8,12 @@ Options:
   -d, --database <name>    Target database (defaults to ML_CONTENT_DB)
   -p, --params <value>     Value for the REST API vars parameter
   -v, --vars <pairs>       Convert key=value pairs to JSON`,
-  modules: `Usage: mlsh modules {find <pattern>|load|loadOne|clone|reset} [--workspace <directory>]
+  modules: `Usage: mlsh modules {find <pattern>|new <pattern>|load|loadOne|clone|reset} [--workspace <directory>]
 
 Download modules for local editing and load them back into MarkLogic.
+
+'find' reuses the most recent module workspace if one exists, only creating a
+new dated folder if none are available. 'new' always creates a fresh workspace.
 
 Load, reset, and clone reuse today's workspace or the newest valid modules_*
 workspace. Use --workspace to select one explicitly.`,

@@ -182,11 +182,106 @@ printf '200'
       encoding: 'utf8'
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Using latest module workspace: modules_20260729/);
-    assert.match(result.stdout, /Module load complete: 1 loaded, 0 skipped, 0 failed/);
-  });
+     assert.match(result.stdout, /Using latest module workspace: modules_20260729/);
+     assert.match(result.stdout, /Module load complete: 1 loaded, 0 skipped, 0 failed/);
+   });
 
-  test('uses MLCP copy-specific connection arguments', () => {
+   test('modules find reuses the most recent existing workspace instead of creating today\'s dated folder', () => {
+     const root = path.join(home, 'find-reuse-test');
+     const workspaceRoot = path.join(root, 'workspaces');
+     const older = path.join(workspaceRoot, 'modules_20260728');
+     const newer = path.join(workspaceRoot, 'modules_20260729');
+     const fakeBin = path.join(root, 'bin');
+     const mlshHome = path.join(root, 'mlsh-home');
+     fs.mkdirSync(older, { recursive: true });
+     fs.mkdirSync(newer, { recursive: true });
+     fs.mkdirSync(fakeBin);
+     fs.writeFileSync(path.join(older, 'module-info.txt'), '');
+     fs.writeFileSync(path.join(newer, 'module-info.txt'), '');
+     fs.utimesSync(path.join(older, 'module-info.txt'), new Date(1000), new Date(1000));
+     fs.utimesSync(path.join(newer, 'module-info.txt'), new Date(2000), new Date(2000));
+     
+     // Create and activate an environment with modules_db configured
+     const envDir = configDirectory(mlshHome);
+     writeEnvironment('test', envDir);
+     activateEnvironment('test', envDir, mlshHome);
+     
+     // Create a fake curl that returns a mock module record
+     const curl = path.join(fakeBin, 'curl');
+     fs.writeFileSync(curl, `#!/bin/sh
+output=
+previous=
+for argument in "$@"; do
+  if [ "$previous" = "-o" ]; then output="$argument"; fi
+  previous="$argument"
+done
+cat > "$output" << 'CURL_EOF'
+/test.xqy~test.xqy~read~apps~EOL
+CURL_EOF
+printf '200'
+`);
+     fs.chmodSync(curl, 0o755);
+
+     // Run modules find from the workspace directory (should reuse the newest workspace)
+     const result = spawnSync(process.execPath, [path.resolve('bin/mlsh'), 'modules', 'find', 'test'], {
+       cwd: workspaceRoot,
+       input: '1\n', // Select module 1 to download
+       env: { ...process.env, HOME: mlshHome, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, MLSH_INTERACTIVE: '1' },
+       encoding: 'utf8'
+     });
+     assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+     assert.match(result.stdout, /Reusing latest module workspace: modules_20260729/, `stdout: ${result.stdout}`);
+     // Verify no new modules_<today> folder was created
+     const todayName = `modules_${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}`;
+     assert.ok(!fs.existsSync(path.join(workspaceRoot, todayName)), `Should not create ${todayName} when existing workspace available`);
+   });
+
+   test('modules new always creates a fresh dated folder even when an existing workspace is present', () => {
+     const root = path.join(home, 'new-force-test');
+     const workspaceRoot = path.join(root, 'workspaces');
+     const existing = path.join(workspaceRoot, 'modules_20260729');
+     const fakeBin = path.join(root, 'bin');
+     const mlshHome = path.join(root, 'mlsh-home');
+     fs.mkdirSync(existing, { recursive: true });
+     fs.mkdirSync(fakeBin);
+     fs.writeFileSync(path.join(existing, 'module-info.txt'), '');
+     
+     // Create and activate an environment with modules_db configured
+     const envDir = configDirectory(mlshHome);
+     writeEnvironment('test', envDir);
+     activateEnvironment('test', envDir, mlshHome);
+     
+     // Create a fake curl that returns a mock module record
+     const curl = path.join(fakeBin, 'curl');
+     fs.writeFileSync(curl, `#!/bin/sh
+output=
+previous=
+for argument in "$@"; do
+  if [ "$previous" = "-o" ]; then output="$argument"; fi
+  previous="$argument"
+done
+cat > "$output" << 'CURL_EOF'
+/test.xqy~test.xqy~read~apps~EOL
+CURL_EOF
+printf '200'
+`);
+     fs.chmodSync(curl, 0o755);
+
+     // Run modules new from the workspace directory (should force creation of a new dated folder)
+     const result = spawnSync(process.execPath, [path.resolve('bin/mlsh'), 'modules', 'new', 'test'], {
+       cwd: workspaceRoot,
+       input: '1\n', // Select module 1 to download
+       env: { ...process.env, HOME: mlshHome, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, MLSH_INTERACTIVE: '1' },
+       encoding: 'utf8'
+     });
+     assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+     assert.match(result.stdout, /Creating new module workspace: modules_/, `stdout: ${result.stdout}`);
+     // Verify a new modules_<today> folder was created
+     const todayName = `modules_${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}`;
+     assert.ok(fs.existsSync(path.join(workspaceRoot, todayName)), `Should create ${todayName}`);
+   });
+
+   test('uses MLCP copy-specific connection arguments', () => {
     const environment = { host: 'localhost', port: '8000', user: 'admin', pass: 'secret' };
     const args = mlcpConnectionArgs('copy', environment);
     assert.deepEqual(args.slice(0, 8), ['-input_host', 'localhost', '-input_port', '8000', '-input_username', 'admin', '-input_password', 'secret']);

@@ -6,6 +6,8 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { parseEvalArgs, pairsToJson, resolveScript } from './commands/eval.js';
+import { buildScriptBar, buildStatusLine, resolveSelection } from './commands/eval-tui.js';
+import { paintRow, padTo, truncateVisible, visibleLength } from './lib/tui.js';
 import { mlcpConnectionArgs } from './commands/external.js';
 import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
 import { createContext } from './main.js';
@@ -25,6 +27,10 @@ import {
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-test-'));
 let passed = 0;
+
+function stripAnsi(text) {
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
 
 function test(name, run) {
   try {
@@ -120,6 +126,74 @@ try {
       permissions: 'read',
       collections: 'apps'
     });
+  });
+
+  test('tui: visibleLength ignores ANSI escape codes', () => {
+    assert.equal(visibleLength('plain'), 5);
+    assert.equal(visibleLength('\x1b[38;5;1mred\x1b[0m'), 3);
+    assert.equal(visibleLength(''), 0);
+  });
+
+  test('tui: padTo pads styled text to the visible width', () => {
+    const styled = '\x1b[38;5;1mhi\x1b[0m';
+    const padded = padTo(styled, 5, (fill) => fill);
+    assert.equal(visibleLength(padded), 5);
+    assert.ok(padded.startsWith(styled));
+  });
+
+  test('tui: truncateVisible shortens overlong text and adds an ellipsis', () => {
+    assert.equal(truncateVisible('hello world', 5), 'hell…');
+    assert.equal(truncateVisible('short', 10), 'short');
+  });
+
+  test('tui: paintRow keeps a single background across the whole row and pads to width', () => {
+    const row = paintRow(236, 10, (segment) => segment(255, 'hi'));
+    assert.equal(visibleLength(row), 10);
+    assert.match(stripAnsi(row), /^hi {8}$/);
+    assert.match(row, /48;5;236/);
+  });
+
+  test('eval-tui: resolveSelection maps a digit buffer to the matching script', () => {
+    const scripts = ['a.xqy', 'b.js', 'c.sjs'];
+    assert.equal(resolveSelection('1', scripts), 'a.xqy');
+    assert.equal(resolveSelection('3', scripts), 'c.sjs');
+    assert.equal(resolveSelection('9', scripts), null);
+    assert.equal(resolveSelection('', scripts), null);
+  });
+
+  test('eval-tui: buildScriptBar renders a compact numbered list with dividers', () => {
+    const bar = buildScriptBar(['clear.xqy', 'stats.sjs'], { width: 40, selected: 'clear.xqy' });
+    const plain = stripAnsi(bar);
+    assert.match(plain, /1:clear\.xqy│2:stats\.sjs/);
+    assert.equal(visibleLength(bar), 40);
+  });
+
+  test('eval-tui: buildScriptBar shows a placeholder when no scripts are present', () => {
+    const bar = buildScriptBar([], { width: 40 });
+    assert.match(stripAnsi(bar), /No \.xqy\/\.js\/\.sjs scripts/);
+  });
+
+  test('eval-tui: buildStatusLine shows mode, buffer, script, database, and elapsed time', () => {
+    const line = buildStatusLine({
+      width: 90,
+      editArmed: false,
+      buffer: '1',
+      lastScript: 'clear.xqy',
+      database: 'FS-content',
+      elapsed: '0.42'
+    });
+    const plain = stripAnsi(line);
+    assert.match(plain, /RUN/);
+    assert.match(plain, /#1/);
+    assert.match(plain, /clear\.xqy/);
+    assert.match(plain, /db:FS-content/);
+    assert.match(plain, /0\.42s/);
+    assert.equal(visibleLength(line), 90);
+  });
+
+  test('eval-tui: buildStatusLine shows EDIT mode when armed', () => {
+    const line = buildStatusLine({ width: 40, editArmed: true, buffer: '', lastScript: '', database: '', elapsed: null });
+    assert.match(stripAnsi(line), /EDIT/);
   });
 
   test('reuses the newest valid module workspace when today has none', () => {

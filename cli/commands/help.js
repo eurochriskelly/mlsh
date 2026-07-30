@@ -7,7 +7,13 @@ Options:
   -s, --script <file>       Script to evaluate
   -d, --database <name>    Target database (defaults to ML_CONTENT_DB)
   -p, --params <value>     Value for the REST API vars parameter
-  -v, --vars <pairs>       Convert key=value pairs to JSON`,
+  -v, --vars <pairs>       Convert key=value pairs to JSON
+
+Running 'mlsh eval' with no script opens an interactive picker for scripts
+(.xqy, .js, .sjs) in the current directory. In a real terminal this is a
+full-screen view:
+  [1-9] run a script     [e] then a number to edit it ($EDITOR/nvim/vim/vi)
+  [p]   set query params [q] or Ctrl+C to quit`,
   modules: `Usage: mlsh modules {find <pattern>|new <pattern>|load|loadOne|clone|reset} [--workspace <directory>]
 
 Download modules for local editing and load them back into MarkLogic.

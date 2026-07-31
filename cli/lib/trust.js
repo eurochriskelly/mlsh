@@ -8,8 +8,18 @@ import { commandExists, runProcess } from './process.js';
 // runner's forked JVM (see gradle/mlcp/build.gradle). It never replaces or
 // touches the JDK's own default trust store used elsewhere. The password
 // isn't a secret - the store only ever holds public server certificates,
-// never private keys - it's just required by the JKS format.
+// never private keys - it's just required by the keystore format.
+//
+// Explicitly PKCS12 (not JKS): since JDK 9, `keytool` defaults to creating
+// PKCS12 stores even when the file is named *.jks, and the JVM's
+// javax.net.ssl.trustStoreType system property must match the file's actual
+// format or the custom trust store silently fails to load (falling back to
+// the default cacerts, and reproducing the exact "unable to find valid
+// certification path" error insecure=true is meant to fix). Passing
+// -storetype explicitly here keeps that pinned regardless of keytool's
+// default, on any JDK version.
 export const TRUST_STORE_PASSWORD = 'mlsh-trust-store';
+export const TRUST_STORE_TYPE = 'PKCS12';
 
 export function trustStorePath(home = os.homedir()) {
   return path.join(home, '.mlsh', 'trust-store.jks');
@@ -39,7 +49,7 @@ export function fetchPeerCertificatePem(host, port, timeout = 10000) {
 
 async function aliasAlreadyTrusted(storePath, alias) {
   if (!fs.existsSync(storePath)) return false;
-  const result = await runProcess('keytool', ['-list', '-keystore', storePath, '-storepass', TRUST_STORE_PASSWORD, '-alias', alias]);
+  const result = await runProcess('keytool', ['-list', '-keystore', storePath, '-storetype', TRUST_STORE_TYPE, '-storepass', TRUST_STORE_PASSWORD, '-alias', alias]);
   return result.code === 0;
 }
 
@@ -64,6 +74,7 @@ export async function ensureTrustedCertificate({ host, port }, home = os.homedir
       '-alias', alias,
       '-file', tempFile,
       '-keystore', storePath,
+      '-storetype', TRUST_STORE_TYPE,
       '-storepass', TRUST_STORE_PASSWORD
     ]);
     if (result.code !== 0) {
@@ -82,5 +93,5 @@ export async function ensureTrustedCertificates(entries, home = os.homedir()) {
   const unique = [...new Map(entries.map(entry => [`${entry.host}:${entry.port}`, entry])).values()];
   if (!unique.length) return null;
   for (const entry of unique) await ensureTrustedCertificate(entry, home);
-  return { trustStorePath: trustStorePath(home), trustStorePassword: TRUST_STORE_PASSWORD };
+  return { trustStorePath: trustStorePath(home), trustStorePassword: TRUST_STORE_PASSWORD, trustStoreType: TRUST_STORE_TYPE };
 }

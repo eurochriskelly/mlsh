@@ -219,6 +219,12 @@ one environment to another in a single step.
 The first `mlcp` run downloads Gradle and MLCP automatically (both are cached afterward), so only
 a JDK (17 or later) needs to be installed beforehand.
 
+Every run's full MLCP/Gradle output is also written to a timestamped file under
+`~/.mlsh/mlcp-logs/`, and the exact path is printed both before and after the run - useful since
+terminal scrollback for a long-running job can be easy to lose or scroll past. In the job browser,
+pressing `l` after a run (or any time afterward, while viewing that job) opens the log in
+`$PAGER`/`less` directly against the real terminal.
+
 ### Run CoRB
 
 By default, MLSH looks under `~/.mlsh.d/dependencies/`:

@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `insecure=true` environment setting: trusts a self-signed/internal TLS certificate for that
   environment. `curl`-based commands pass `--insecure`; `mlcp` uses a trust-on-first-use Java
   trust store (`~/.mlsh/trust-store.jks`) scoped to that server's own JVM process.
+- `mlcp` job runs now capture their full MLCP/Gradle output to a timestamped log file under
+  `~/.mlsh/mlcp-logs/` (printed before and after the run), and the job browser's `l` key opens
+  that log in `$PAGER`/`less` directly against the real terminal.
 
 ### Fixed
 
@@ -37,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path used everywhere else in MLSH, instead of inheriting the current process's stdio - which
   could crash the interactive shell's `tee`-based session logging with `EAGAIN`/"Resource
   temporarily unavailable" when invoked from inside `mlsh`.
+- `insecure=true` environments actually take effect for `mlcp` now: the generated Java trust
+  store is explicitly created and loaded as PKCS12 (matching `keytool`'s actual default output
+  format since JDK 9), rather than being mislabeled as JKS - a mismatch that made the JVM
+  silently fall back to the default trust store and reproduce the original certificate error.
 
 ### Removed
 

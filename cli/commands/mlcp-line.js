@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { spawnSync } from 'child_process';
 import { ask, confirm } from '../lib/prompt.js';
 import {
   createAndEditJob,
@@ -6,6 +7,7 @@ import {
   jobBaseName,
   jobDirectory,
   listJobs,
+  mlcpLogPath,
   MLCP_OPERATIONS,
   nextJobName,
   parseJobFile,
@@ -51,7 +53,11 @@ export async function lineBasedInteractiveMlcp(context) {
       console.log(`\n--- ${name}.job ---`);
       console.log(fs.readFileSync(resolveJobFile(directory, jobBaseName(name)), 'utf8'));
       if (await confirm(`Run this ${operation} job now? (y/n): `)) {
-        await executeInvocation(context, operation, name, fields, directory);
+        const logFile = mlcpLogPath(context.home, operation, name);
+        await executeInvocation(context, operation, name, fields, directory, { logFile });
+        if (fs.existsSync(logFile) && (await confirm('View the full log in less now? (y/n): '))) {
+          spawnSync(process.env.PAGER || 'less', ['-R', logFile], { stdio: 'inherit' });
+        }
       }
     }
   }

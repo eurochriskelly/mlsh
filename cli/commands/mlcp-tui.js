@@ -1,5 +1,6 @@
 import fs from 'fs';
 import readline from 'readline';
+import { spawn } from 'child_process';
 import { editOnTty } from '../lib/editor.js';
 import {
   ansi,
@@ -20,6 +21,7 @@ import {
   executeInvocation,
   jobDirectory,
   listJobs,
+  mlcpLogPath,
   MLCP_OPERATIONS,
   nextJobName,
   parseJobFile,
@@ -44,7 +46,7 @@ export function buildHeaderRow({ totalWidth, sidebarWidth, sidebarTitle, content
 const STAGE_HINTS = {
   types: '[\u2191/\u2193 j/k] navigate   [ENTER] select   [q] quit',
   jobList: '[\u2191/\u2193 j/k] navigate   [ENTER] open   [n] new job   [ESC] back   [q] quit',
-  jobView: '[r] run   [e] edit   [ESC] back   [q] quit'
+  jobView: '[r] run   [e] edit   [l] view last log   [ESC] back   [q] quit'
 };
 
 // Pure: single full-width status row with per-stage key hints on the left
@@ -76,6 +78,24 @@ function askOnTty({ input, output }, question) {
   });
 }
 
+// Opens a log file in $PAGER (or less) against the real controlling terminal,
+// independent of whichever stdio this process itself was started with.
+function viewInPager(logFile) {
+  return new Promise((resolve) => {
+    let fd;
+    try {
+      fd = fs.openSync('/dev/tty', 'r+');
+    } catch {
+      resolve();
+      return;
+    }
+    const pager = spawn(process.env.PAGER || 'less', ['-R', logFile], { stdio: [fd, fd, fd] });
+    const done = () => { fs.closeSync(fd); resolve(); };
+    pager.on('exit', done);
+    pager.on('error', done);
+  });
+}
+
 export async function runMlcpTui(context, ttyHandle) {
   const { input, output } = ttyHandle;
 
@@ -87,6 +107,7 @@ export async function runMlcpTui(context, ttyHandle) {
   let selectedJob = null;
   let jobContent = '';
   let lastRunCode = null;
+  let lastLogFile = null;
 
   enterAltScreen(output);
   hideCursor(output);
@@ -136,6 +157,8 @@ export async function runMlcpTui(context, ttyHandle) {
   const openJob = (name) => {
     selectedJob = name;
     jobContent = fs.readFileSync(resolveJobFile(currentDirectory(), name), 'utf8');
+    lastLogFile = null;
+    lastRunCode = null;
     stage = 'jobView';
   };
 
@@ -176,13 +199,17 @@ export async function runMlcpTui(context, ttyHandle) {
   const runJob = async () => {
     suspendForExternalIO();
     const fields = parseJobFile(jobContent);
+    const logFile = mlcpLogPath(context.home, selectedType, selectedJob);
     try {
-      lastRunCode = await executeInvocation(context, selectedType, selectedJob, fields, currentDirectory());
+      lastRunCode = await executeInvocation(context, selectedType, selectedJob, fields, currentDirectory(), { logFile });
+      lastLogFile = logFile;
     } catch (error) {
       output.write(`mlcp: ${error.message}\n`);
       lastRunCode = 1;
+      lastLogFile = fs.existsSync(logFile) ? logFile : null;
     }
-    await askOnTty(ttyHandle, 'Press ENTER to return: ');
+    const answer = await askOnTty(ttyHandle, 'Press ENTER to return, or type L to view the full log in less: ');
+    if (answer.toLowerCase() === 'l' && lastLogFile) await viewInPager(lastLogFile);
     resumeTui();
     draw();
   };
@@ -214,6 +241,7 @@ export async function runMlcpTui(context, ttyHandle) {
       // stage === 'jobView'
       if (key.name === 'r') { await runJob(); return; }
       if (key.name === 'e') { await editJob(); return; }
+      if (key.name === 'l' && lastLogFile) { suspendForExternalIO(); await viewInPager(lastLogFile); resumeTui(); draw(); return; }
       if (key.name === 's' || key.name === 'escape' || key.name === 'backspace' || key.name === 'left') { stage = 'jobList'; draw(); return; }
     }, input);
   }

@@ -20,6 +20,7 @@ import {
   sidebarWindow
 } from './commands/eval-tui.js';
 import { openControllingTty, paintRow, padTo, truncateVisible, visibleLength, watchResize } from './lib/tui.js';
+import { runProcess } from './lib/process.js';
 import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
 import {
   buildMlcpInvocation,
@@ -136,6 +137,19 @@ try {
     assert.equal(isInsecure({ insecure: 'false' }), false);
     assert.equal(isInsecure({}), false);
     assert.equal(isInsecure(undefined), false);
+  });
+
+  await test('process: runProcess with logFile tees inherited output to a file as well as the terminal', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-process-log-'));
+    const logFile = path.join(directory, 'out.log');
+    const result = await runProcess('sh', ['-c', 'echo out-line; echo err-line 1>&2'], { inherit: true, logFile });
+    assert.equal(result.code, 0);
+    const contents = fs.readFileSync(logFile, 'utf8');
+    assert.match(contents, /out-line/);
+    assert.match(contents, /err-line/);
+    assert.match(result.stdout.toString(), /out-line/);
+    assert.match(result.stderr.toString(), /err-line/);
+    fs.rmSync(directory, { recursive: true, force: true });
   });
 
   await test('parses eval options and variables without losing quoted values', () => {
@@ -802,6 +816,7 @@ printf '200'
       const fakeGradlew = path.join(gradleRunnerDir, 'gradlew');
       fs.writeFileSync(fakeGradlew, `#!/bin/sh
 node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({command: process.env.MLSH_MLCP_COMMAND, options: JSON.parse(process.env.MLSH_MLCP_OPTIONS_JSON), extra: JSON.parse(process.env.MLSH_MLCP_EXTRA_ARGS_JSON)}))" "${capturedEnvPath}"
+echo "mlcp fake stdout line"
 `);
       fs.chmodSync(fakeGradlew, 0o755);
 
@@ -812,6 +827,7 @@ node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({command: p
       });
       assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
       assert.match(result.stdout, /MLCP job: 123/);
+      assert.match(result.stdout, /mlcp fake stdout line/);
       const captured = JSON.parse(fs.readFileSync(capturedEnvPath, 'utf8'));
       assert.equal(captured.command, 'IMPORT');
       assert.equal(captured.options.input_file_path, 'data/import');
@@ -820,6 +836,14 @@ node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({command: p
       assert.equal(captured.options.username, 'admin');
       assert.equal(captured.options.password, 'admin');
       assert.deepEqual(captured.extra, []);
+
+      // The output is also captured to a stable log file (not just terminal
+      // scrollback), and the CLI prints exactly where.
+      const logMatch = result.stdout.match(/Full output saved to: (.*mlcp-logs.*\.log)/);
+      assert.ok(logMatch, `expected a "Full output saved to" line in:\n${result.stdout}`);
+      const logFile = logMatch[1].trim();
+      assert.ok(fs.existsSync(logFile), `log file should exist at ${logFile}`);
+      assert.match(fs.readFileSync(logFile, 'utf8'), /mlcp fake stdout line/);
     } finally {
       fs.rmSync(mlcpHome, { recursive: true, force: true });
       fs.rmSync(project, { recursive: true, force: true });

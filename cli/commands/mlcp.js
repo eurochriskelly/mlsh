@@ -357,10 +357,19 @@ export function insecureEntries(operation, environments) {
   return entries;
 }
 
+// Deterministic-ish (timestamped) path for a job run's captured MLCP/Gradle
+// output. Exported so callers that want to reference the exact same log file
+// afterward (e.g. the TUI's "view in less" prompt) can compute it up front
+// and pass it into executeInvocation via the logFile option.
+export function mlcpLogPath(home, operation, name) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return path.join(home, '.mlsh', 'mlcp-logs', `${operation}-${name}-${timestamp}.log`);
+}
+
 // Resolves environments, builds the MlcpTask invocation, and runs it via the
 // bundled ml-gradle wrapper. Shared by the direct CLI path and the TUI's
 // 'r' (run) key, so both behave identically.
-export async function executeInvocation(context, operation, name, fields, directory) {
+export async function executeInvocation(context, operation, name, fields, directory, { logFile } = {}) {
   const environments = resolveEnvironmentsForOperation(operation, { env_from: fields.env_from, env_to: fields.env_to }, context);
   const invocation = buildMlcpInvocation(operation, fields, environments);
 
@@ -379,7 +388,7 @@ export async function executeInvocation(context, operation, name, fields, direct
       jvmArgs = [
         `-Djavax.net.ssl.trustStore=${trust.trustStorePath}`,
         `-Djavax.net.ssl.trustStorePassword=${trust.trustStorePassword}`,
-        '-Djavax.net.ssl.trustStoreType=JKS'
+        `-Djavax.net.ssl.trustStoreType=${trust.trustStoreType}`
       ];
     }
   }
@@ -392,15 +401,21 @@ export async function executeInvocation(context, operation, name, fields, direct
     MLSH_MLCP_JVM_ARGS_JSON: JSON.stringify(jvmArgs)
   };
 
+  const resolvedLogFile = logFile || mlcpLogPath(context.home, operation, name);
+  fs.mkdirSync(path.dirname(resolvedLogFile), { recursive: true });
+
   console.log(`Running MLCP ${invocation.command} via ml-gradle (first run downloads Gradle and MLCP)...`);
+  console.log(`Full output is also being written to: ${resolvedLogFile}`);
   console.log('═══════════════════════════════════════════════════════════');
   const result = await runProcess(gradlew, ['--quiet', '--console=plain', 'mlshMlcp'], {
     cwd: gradleRunnerDirectory(context),
     env,
-    inherit: true
+    inherit: true,
+    logFile: resolvedLogFile
   });
   console.log('═══════════════════════════════════════════════════════════');
   console.log(`MLCP completed with exit code: ${result.code}`);
+  console.log(`Full output saved to: ${resolvedLogFile}`);
   return result.code;
 }
 

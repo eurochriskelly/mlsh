@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the job file itself.
 - `mlsh mlcp` with no arguments: an interactive, full-screen job browser (type -> jobs -> view),
   matching `mlsh eval`'s picker conventions, with `r` to run, `e` to edit, and `n` to create a job.
+- `insecure=true` environment setting: trusts a self-signed/internal TLS certificate for that
+  environment. `curl`-based commands pass `--insecure`; `mlcp` uses a trust-on-first-use Java
+  trust store (`~/.mlsh/trust-store.jks`) scoped to that server's own JVM process.
+
+### Fixed
+
+- The MLCP TUI's "new job" flow (`n`) now edits the job file via the same controlling-terminal
+  path used everywhere else in MLSH, instead of inheriting the current process's stdio - which
+  could crash the interactive shell's `tee`-based session logging with `EAGAIN`/"Resource
+  temporarily unavailable" when invoked from inside `mlsh`.
 
 ### Removed
 

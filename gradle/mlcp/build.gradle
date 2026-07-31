@@ -8,6 +8,9 @@
 //   MLSH_MLCP_COMMAND            "IMPORT", "EXPORT", or "COPY"
 //   MLSH_MLCP_OPTIONS_JSON       JSON object of MlcpTask property assignments
 //   MLSH_MLCP_EXTRA_ARGS_JSON    JSON array of extra "-option value" mlcp args
+//   MLSH_MLCP_JVM_ARGS_JSON      JSON array of extra JVM args for mlcp's forked
+//                                process (e.g. a per-environment trust store,
+//                                for environments configured with insecure=true)
 //
 // Credentials and connection details always flow through these environment
 // variables at run time; they are never written to disk or passed as
@@ -46,5 +49,11 @@ tasks.register("mlshMlcp", com.marklogic.gradle.task.MlcpTask) {
 	def extraArgs = new JsonSlurper().parseText(extraArgsJson)
 	if (extraArgs) {
 		args = extraArgs.collect { it.toString() }
+	}
+
+	def jvmArgsJson = System.getenv("MLSH_MLCP_JVM_ARGS_JSON") ?: "[]"
+	def extraJvmArgs = new JsonSlurper().parseText(jvmArgsJson)
+	if (extraJvmArgs) {
+		jvmArgs = extraJvmArgs.collect { it.toString() }
 	}
 }

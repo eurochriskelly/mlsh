@@ -1,9 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { edit } from '../lib/editor.js';
-import { loadNamedEnvironment } from '../lib/environment-files.js';
+import { isInsecure, loadNamedEnvironment } from '../lib/environment-files.js';
 import { confirm } from '../lib/prompt.js';
 import { runProcess } from '../lib/process.js';
+import { ensureTrustedCertificates } from '../lib/trust.js';
 
 // MlcpTask properties (com.marklogic.gradle.task.MlcpTask), excluding:
 //  - command/host/port/username/password/ssl/input_*/output_* connection
@@ -307,11 +308,17 @@ export function redactedSummary({ command, properties }) {
   return `${command} ${JSON.stringify(safe)}`;
 }
 
-export function createAndEditJob(directory, operation, name, { temporary = false } = {}) {
+// editFn defaults to edit() for direct CLI usage (inherits the current
+// process's stdio, which is correct there). The TUI passes editOnTty()
+// instead, since it has already taken over /dev/tty directly and suspended
+// its alt-screen session - inheriting process.stdout there would attach the
+// editor to the wrong stream (e.g. the interactive shell's `tee` pipe) and
+// leave the terminal in a broken state.
+export function createAndEditJob(directory, operation, name, { temporary = false, editFn = edit } = {}) {
   fs.mkdirSync(directory, { recursive: true });
   const workingFile = temporary ? path.join(directory, `.new-${process.pid}.job`) : resolveJobFile(directory, name);
   fs.writeFileSync(workingFile, jobTemplate(operation, name));
-  edit(workingFile);
+  editFn(workingFile);
   const fields = parseJobFile(fs.readFileSync(workingFile, 'utf8'));
   const finalName = jobBaseName(fields.job || name);
   validateJobName(finalName);
@@ -335,6 +342,21 @@ function gradlewExecutable(context) {
   return path.join(directory, process.platform === 'win32' ? 'gradlew.bat' : 'gradlew');
 }
 
+// Pure: which host:port pairs need trust-on-first-use certificate handling,
+// based on which resolved environments (if any) are marked insecure=true.
+export function insecureEntries(operation, environments) {
+  const entries = [];
+  if (operation === 'import' || operation === 'copy') {
+    const environment = environments.envTo;
+    if (environment && isInsecure(environment)) entries.push({ host: environment.host, port: environment.port });
+  }
+  if (operation === 'export' || operation === 'copy') {
+    const environment = environments.envFrom;
+    if (environment && isInsecure(environment)) entries.push({ host: environment.host, port: environment.port });
+  }
+  return entries;
+}
+
 // Resolves environments, builds the MlcpTask invocation, and runs it via the
 // bundled ml-gradle wrapper. Shared by the direct CLI path and the TUI's
 // 'r' (run) key, so both behave identically.
@@ -348,11 +370,26 @@ export async function executeInvocation(context, operation, name, fields, direct
   const gradlew = gradlewExecutable(context);
   if (!fs.existsSync(gradlew)) throw new Error(`Bundled MLCP runner not found at ${gradlew}.`);
 
+  const untrustedEntries = insecureEntries(operation, environments);
+  let jvmArgs = [];
+  if (untrustedEntries.length) {
+    console.log(`Trusting TLS certificate for ${untrustedEntries.map(entry => `${entry.host}:${entry.port}`).join(', ')} (insecure=true)...`);
+    const trust = await ensureTrustedCertificates(untrustedEntries, context.home);
+    if (trust) {
+      jvmArgs = [
+        `-Djavax.net.ssl.trustStore=${trust.trustStorePath}`,
+        `-Djavax.net.ssl.trustStorePassword=${trust.trustStorePassword}`,
+        '-Djavax.net.ssl.trustStoreType=JKS'
+      ];
+    }
+  }
+
   const env = {
     ...context.processEnvironment,
     MLSH_MLCP_COMMAND: invocation.command,
     MLSH_MLCP_OPTIONS_JSON: JSON.stringify(invocation.properties),
-    MLSH_MLCP_EXTRA_ARGS_JSON: JSON.stringify(invocation.extraArgs)
+    MLSH_MLCP_EXTRA_ARGS_JSON: JSON.stringify(invocation.extraArgs),
+    MLSH_MLCP_JVM_ARGS_JSON: JSON.stringify(jvmArgs)
   };
 
   console.log(`Running MLCP ${invocation.command} via ml-gradle (first run downloads Gradle and MLCP)...`);

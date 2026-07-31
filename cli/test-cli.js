@@ -6,6 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
+import tls from 'tls';
 import { isSupportedScriptFile, listScripts, parseEvalArgs, pairsToJson, resolveScript, SCRIPT_EXTENSIONS } from './commands/eval.js';
 import {
   buildContentBody,
@@ -23,6 +24,7 @@ import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './c
 import {
   buildMlcpInvocation,
   classifyJobFields,
+  insecureEntries,
   jobBaseName,
   jobDirectory,
   jobTemplate,
@@ -43,6 +45,7 @@ import {
   defaultEnvironment,
   environmentPath,
   generateShellConfig,
+  isInsecure,
   loadActiveEnvironment,
   listEnvironments,
   parseEnvironment,
@@ -50,6 +53,7 @@ import {
   saveEditedEnvironment,
   writeEnvironment
 } from './lib/environment-files.js';
+import { certificateAlias, ensureTrustedCertificates, trustStorePath } from './lib/trust.js';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-test-'));
 let passed = 0;
@@ -58,9 +62,9 @@ function stripAnsi(text) {
   return text.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-function test(name, run) {
+async function test(name, run) {
   try {
-    run();
+    await run();
     console.log(`✓ ${name}`);
     passed++;
   } catch (error) {
@@ -72,18 +76,18 @@ function test(name, run) {
 try {
   const directory = configDirectory(home);
 
-  test('creates a default editable environment', () => {
+  await test('creates a default editable environment', () => {
     const file = writeEnvironment('dev', directory);
     const settings = parseEnvironment(fs.readFileSync(file, 'utf8'));
     assert.deepEqual(settings, defaultEnvironment('dev'));
   });
 
-  test('lists environment files alphabetically', () => {
+  await test('lists environment files alphabetically', () => {
     writeEnvironment('prod', directory);
     assert.deepEqual(listEnvironments(directory), ['dev', 'prod']);
   });
 
-  test('uses the name in the file when saving an environment', () => {
+  await test('uses the name in the file when saving an environment', () => {
     const file = writeEnvironment('new', directory);
     fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('name=new', 'name=staging'));
     const saved = saveEditedEnvironment(file, directory);
@@ -92,11 +96,11 @@ try {
     assert.ok(!fs.existsSync(file));
   });
 
-  test('rejects unsafe environment names', () => {
+  await test('rejects unsafe environment names', () => {
     assert.throws(() => environmentPath('../prod', directory), /letters, numbers/);
   });
 
-  test('activates an environment in shell-compatible form', () => {
+  await test('activates an environment in shell-compatible form', () => {
     const settings = activateEnvironment('dev', directory, home);
     const generated = fs.readFileSync(path.join(home, '.mlshrc-gen'), 'utf8');
     assert.equal(settings.host, 'localhost');
@@ -104,18 +108,18 @@ try {
     assert.match(generated, /export ML_CONTENT_DB="content"/);
   });
 
-  test('loads the active environment without sourcing shell code', () => {
+  await test('loads the active environment without sourcing shell code', () => {
     const loaded = loadActiveEnvironment(home, { HOME: home });
     assert.equal(loaded.name, 'dev');
     assert.equal(loaded.content_db, 'content');
   });
 
-  test('reads legacy generated shell environments safely', () => {
+  await test('reads legacy generated shell environments safely', () => {
     const parsed = parseShellEnvironment('export ML_ENV="test"\nexport ML_HOST="example.test"\nrun-something-dangerous\n');
     assert.deepEqual(parsed, { name: 'test', host: 'example.test' });
   });
 
-  test('quotes generated shell values without executing their contents', () => {
+  await test('quotes generated shell values without executing their contents', () => {
     const marker = path.join(home, 'should-not-exist');
     const config = path.join(home, 'quoted-env.sh');
     const pass = `value$(touch ${marker})$HOME\`uname\`"quoted`;
@@ -126,7 +130,15 @@ try {
     assert.ok(!fs.existsSync(marker));
   });
 
-  test('parses eval options and variables without losing quoted values', () => {
+  await test('isInsecure recognises the insecure=true environment flag case-insensitively', () => {
+    assert.equal(isInsecure({ insecure: 'true' }), true);
+    assert.equal(isInsecure({ insecure: 'TRUE' }), true);
+    assert.equal(isInsecure({ insecure: 'false' }), false);
+    assert.equal(isInsecure({}), false);
+    assert.equal(isInsecure(undefined), false);
+  });
+
+  await test('parses eval options and variables without losing quoted values', () => {
     assert.deepEqual(parseEvalArgs(['--script', 'a file.xqy', '--database', 'Documents', '--vars', 'one=two&three=four']), {
       script: 'a file.xqy',
       database: 'Documents',
@@ -136,13 +148,13 @@ try {
     assert.equal(pairsToJson('message=hello world'), '{"message":"hello world"}');
   });
 
-  test('resolves extensionless eval scripts', () => {
+  await test('resolves extensionless eval scripts', () => {
     const script = path.join(home, 'example.xqy');
     fs.writeFileSync(script, '1 + 1');
     assert.equal(resolveScript(path.join(home, 'example')), script);
   });
 
-  test('isSupportedScriptFile/listScripts recognise .xqy, .js, .sjs, .sql, and .spl', () => {
+  await test('isSupportedScriptFile/listScripts recognise .xqy, .js, .sjs, .sql, and .spl', () => {
     assert.ok(isSupportedScriptFile('a.xqy'));
     assert.ok(isSupportedScriptFile('a.js'));
     assert.ok(isSupportedScriptFile('a.sjs'));
@@ -159,7 +171,7 @@ try {
     assert.deepEqual(listScripts(directory), ['five.spl', 'four.sql', 'one.xqy', 'three.sjs', 'two.js']);
   });
 
-  test('normalises module patterns and parses server records', () => {
+  await test('normalises module patterns and parses server records', () => {
     assert.equal(normalisePattern('customer'), '*customer*');
     assert.equal(normalisePattern('*customer?.xqy'), '*customer?.xqy');
     const record = parseModuleRecord('{"uri":"/a.xqy","permissions":["read=apps"],"collections":["apps"]}');
@@ -173,39 +185,39 @@ try {
     assert.deepEqual(derived.collections, []);
   });
 
-  test('tui: visibleLength ignores ANSI escape codes', () => {
+  await test('tui: visibleLength ignores ANSI escape codes', () => {
     assert.equal(visibleLength('plain'), 5);
     assert.equal(visibleLength('\x1b[38;5;1mred\x1b[0m'), 3);
     assert.equal(visibleLength(''), 0);
   });
 
-  test('tui: padTo pads styled text to the visible width', () => {
+  await test('tui: padTo pads styled text to the visible width', () => {
     const styled = '\x1b[38;5;1mhi\x1b[0m';
     const padded = padTo(styled, 5, (fill) => fill);
     assert.equal(visibleLength(padded), 5);
     assert.ok(padded.startsWith(styled));
   });
 
-  test('tui: truncateVisible shortens overlong text and adds an ellipsis', () => {
+  await test('tui: truncateVisible shortens overlong text and adds an ellipsis', () => {
     assert.equal(truncateVisible('hello world', 5), 'hell…');
     assert.equal(truncateVisible('short', 10), 'short');
   });
 
-  test('tui: paintRow keeps a single background across the whole row and pads to width', () => {
+  await test('tui: paintRow keeps a single background across the whole row and pads to width', () => {
     const row = paintRow(236, 10, (segment) => segment(255, 'hi'));
     assert.equal(visibleLength(row), 10);
     assert.match(stripAnsi(row), /^hi {8}$/);
     assert.match(row, /48;5;236/);
   });
 
-  test('tui: openControllingTty degrades gracefully with no controlling terminal', () => {
+  await test('tui: openControllingTty degrades gracefully with no controlling terminal', () => {
     // In CI/sandboxed environments (and under `npm test`), there is typically
     // no controlling terminal available, so this must return null rather than
     // throwing - that's exactly the fallback path non-interactive usage relies on.
     assert.doesNotThrow(() => openControllingTty());
   });
 
-  test('tui: watchResize refreshes a custom tty stream on SIGWINCH and redraws when size changes', () => {
+  await test('tui: watchResize refreshes a custom tty stream on SIGWINCH and redraws when size changes', () => {
     // A tty.WriteStream built from a raw fd (as openControllingTty() does)
     // never auto-updates its .columns/.rows on resize - unlike process.stdout,
     // nothing wires SIGWINCH to it. watchResize must do that wiring itself by
@@ -232,7 +244,7 @@ try {
     assert.equal(redraws, 1, 'stop() should remove the SIGWINCH listener');
   });
 
-  test('tui: watchResize falls back to calling onResize directly when the stream has no _refreshSize', () => {
+  await test('tui: watchResize falls back to calling onResize directly when the stream has no _refreshSize', () => {
     let redraws = 0;
     const fakeOutput = new EventEmitter();
     const stop = watchResize(fakeOutput, () => { redraws++; });
@@ -241,14 +253,14 @@ try {
     stop();
   });
 
-  test('eval-tui: clampCursor keeps the cursor within bounds', () => {
+  await test('eval-tui: clampCursor keeps the cursor within bounds', () => {
     assert.equal(clampCursor(-1, 3), 0);
     assert.equal(clampCursor(5, 3), 2);
     assert.equal(clampCursor(1, 3), 1);
     assert.equal(clampCursor(0, 0), 0);
   });
 
-  test('eval-tui: sidebarWindow returns the full list when it fits, otherwise scrolls to keep the cursor visible', () => {
+  await test('eval-tui: sidebarWindow returns the full list when it fits, otherwise scrolls to keep the cursor visible', () => {
     const scripts = Array.from({ length: 5 }, (_, index) => `s${index + 1}.xqy`);
     assert.deepEqual(sidebarWindow(scripts, 0, 10), { start: 0, items: scripts });
 
@@ -261,12 +273,12 @@ try {
     assert.deepEqual(atStart.items, ['s1.xqy', 's2.xqy', 's3.xqy']);
   });
 
-  test('eval-tui: combineColumns concatenates matching rows from two columns', () => {
+  await test('eval-tui: combineColumns concatenates matching rows from two columns', () => {
     assert.deepEqual(combineColumns(['a', 'b'], ['1', '2']), ['a1', 'b2']);
     assert.deepEqual(combineColumns(['a'], []), ['a']);
   });
 
-  test('eval-tui: buildSidebarBody highlights the cursor row and shows a placeholder when empty', () => {
+  await test('eval-tui: buildSidebarBody highlights the cursor row and shows a placeholder when empty', () => {
     const body = buildSidebarBody(['clear.xqy', 'stats.sjs'], { cursorIndex: 1, width: 30, height: 4 });
     assert.equal(body.length, 4);
     const plain = body.map(stripAnsi);
@@ -278,7 +290,7 @@ try {
     assert.match(stripAnsi(empty[0]), /no scripts/);
   });
 
-  test('eval-tui: buildContentBody shows a navigation hint, a preview, or a result depending on mode', () => {
+  await test('eval-tui: buildContentBody shows a navigation hint, a preview, or a result depending on mode', () => {
     const empty = buildContentBody({ width: 40, height: 3, mode: 'empty' });
     assert.match(stripAnsi(empty[0]), /Navigate with/);
 
@@ -297,7 +309,7 @@ try {
     assert.match(stripAnsi(running[0]), /Running/);
   });
 
-  test('eval-tui: buildHeaderRow shows SCRIPTS plus the selected script and mode', () => {
+  await test('eval-tui: buildHeaderRow shows SCRIPTS plus the selected script and mode', () => {
     const header = buildHeaderRow({ totalWidth: 60, sidebarWidth: 20, selectedScript: 'clear.xqy', mode: 'preview' });
     const plain = stripAnsi(header);
     assert.match(plain, /SCRIPTS/);
@@ -308,7 +320,7 @@ try {
     assert.match(stripAnsi(none), /Select a script/);
   });
 
-  test('eval-tui: buildStatusLine shows different hints for select vs view mode', () => {
+  await test('eval-tui: buildStatusLine shows different hints for select vs view mode', () => {
     const selectLine = buildStatusLine({ width: 90, mode: 'select', lastScript: '', database: 'FS-content' });
     assert.match(stripAnsi(selectLine), /navigate/);
     assert.match(stripAnsi(selectLine), /ENTER.*view/);
@@ -323,14 +335,14 @@ try {
     assert.equal(visibleLength(viewLine), 120);
   });
 
-  test('eval-tui: sidebarWidthFor grows with the longest filename but stays capped', () => {
+  await test('eval-tui: sidebarWidthFor grows with the longest filename but stays capped', () => {
     const narrow = sidebarWidthFor(['a.xqy'], 100);
     assert.ok(narrow >= 18);
     const wide = sidebarWidthFor(['a-very-long-descriptive-script-name-indeed.xqy'], 100);
     assert.ok(wide <= Math.floor(100 * 0.35));
   });
 
-  test('eval-tui: formatDuration renders seconds, minutes, and hours appropriately', () => {
+  await test('eval-tui: formatDuration renders seconds, minutes, and hours appropriately', () => {
     assert.equal(formatDuration(45000), '45s');
     assert.equal(formatDuration(1392000), '23m12s');
     assert.equal(formatDuration(3723000), '1h2m3s');
@@ -338,7 +350,7 @@ try {
     assert.equal(formatDuration(-500), '0s');
   });
 
-  test('reuses the newest valid module workspace when today has none', () => {
+  await test('reuses the newest valid module workspace when today has none', () => {
     const workspaceRoot = path.join(home, 'module-workspaces');
     const older = path.join(workspaceRoot, 'modules_20260728');
     const newer = path.join(workspaceRoot, 'modules_20260729');
@@ -356,7 +368,7 @@ try {
     assert.equal(resolveModuleWorkspace({ cwd: newer }).reason, 'current-directory');
   });
 
-  test('reports where module workspaces were searched without logging a stack at debug level', () => {
+  await test('reports where module workspaces were searched without logging a stack at debug level', () => {
     const emptyWorkspace = path.join(home, 'empty-module-workspace');
     fs.mkdirSync(emptyWorkspace);
     const result = spawnSync(process.execPath, [path.resolve('bin/mlsh'), 'modules', 'load'], {
@@ -371,7 +383,7 @@ try {
     assert.doesNotMatch(diagnosticLog, /at resolveModuleWorkspace/);
   });
 
-  test('loads from a previous-day module workspace through the Node command', () => {
+  await test('loads from a previous-day module workspace through the Node command', () => {
     const root = path.join(home, 'previous-day-load');
     const workspace = path.join(root, 'modules_20260729');
     const edited = path.join(workspace, 'edited');
@@ -402,7 +414,7 @@ printf '200'
      assert.match(result.stdout, /Module load complete: 1 loaded, 0 skipped, 0 failed/);
    });
 
-   test('modules find reuses the most recent existing workspace instead of creating today\'s dated folder', () => {
+   await test('modules find reuses the most recent existing workspace instead of creating today\'s dated folder', () => {
      const root = path.join(home, 'find-reuse-test');
      const workspaceRoot = path.join(root, 'workspaces');
      const older = path.join(workspaceRoot, 'modules_20260728');
@@ -452,7 +464,7 @@ printf '200'
      assert.ok(!fs.existsSync(path.join(workspaceRoot, todayName)), `Should not create ${todayName} when existing workspace available`);
    });
 
-   test('modules new always creates a fresh dated folder even when an existing workspace is present', () => {
+   await test('modules new always creates a fresh dated folder even when an existing workspace is present', () => {
      const root = path.join(home, 'new-force-test');
      const workspaceRoot = path.join(root, 'workspaces');
      const existing = path.join(workspaceRoot, 'modules_20260729');
@@ -497,7 +509,7 @@ printf '200'
      assert.ok(fs.existsSync(path.join(workspaceRoot, todayName)), `Should create ${todayName}`);
    });
 
-  test('runs eval through the Node dispatcher and preserves argument boundaries', () => {
+  await test('runs eval through the Node dispatcher and preserves argument boundaries', () => {
     const binDirectory = path.join(home, 'bin');
     fs.mkdirSync(binDirectory);
     const curl = path.join(binDirectory, 'curl');
@@ -530,7 +542,7 @@ printf '200'
     assert.match(diagnosticLog, /-u \*{8}:\*{8}/);
   });
 
-  test('keeps MLSH commands as first-class functions in the interactive shell', () => {
+  await test('keeps MLSH commands as first-class functions in the interactive shell', () => {
     const result = spawnSync('bash', ['--noprofile', '--rcfile', path.resolve('shell/bashrc'), '-i', '-c', 'printf "types=%s,%s env=%s\\n" "$(type -t eval)" "$(type -t modules)" "$ML_ENV"; env prod >/dev/null; printf "switched=%s\\n" "$ML_ENV"'], {
       env: { ...process.env, HOME: home, MLSH_TOP_DIR: path.resolve('.'), TERM: 'xterm' },
       encoding: 'utf8'
@@ -540,21 +552,21 @@ printf '200'
     assert.match(result.stdout, /switched=prod/);
   });
 
-  test('creates a command context from the selected environment', () => {
+  await test('creates a command context from the selected environment', () => {
     activateEnvironment('dev', directory, home);
     const context = createContext({ topDir: path.resolve('.'), processEnvironment: { HOME: home } });
     assert.equal(context.environment.name, 'dev');
     assert.equal(context.environment.host, 'localhost');
   });
 
-  test('mlcp: validateJobName accepts safe names and rejects unsafe ones', () => {
+  await test('mlcp: validateJobName accepts safe names and rejects unsafe ones', () => {
     assert.doesNotThrow(() => validateJobName('123'));
     assert.doesNotThrow(() => validateJobName('nightly-export_2'));
     assert.throws(() => validateJobName('../etc'), /letters, numbers/);
     assert.throws(() => validateJobName(''), /letters, numbers/);
   });
 
-  test('mlcp: jobBaseName and resolveJobFile normalise the .job suffix', () => {
+  await test('mlcp: jobBaseName and resolveJobFile normalise the .job suffix', () => {
     assert.equal(jobBaseName('123.job'), '123');
     assert.equal(jobBaseName('123'), '123');
     const mlcpDirectory = jobDirectory(home, 'import');
@@ -562,12 +574,12 @@ printf '200'
     assert.equal(resolveJobFile(mlcpDirectory, '123.job'), path.join(mlcpDirectory, '123.job'));
   });
 
-  test('mlcp: jobDirectory resolves under .jobs/mlcp/<operation> relative to the given directory', () => {
+  await test('mlcp: jobDirectory resolves under .jobs/mlcp/<operation> relative to the given directory', () => {
     assert.equal(jobDirectory('/tmp/project', 'import'), path.join('/tmp/project', '.jobs', 'mlcp', 'import'));
     assert.equal(jobDirectory('/tmp/project', 'copy'), path.join('/tmp/project', '.jobs', 'mlcp', 'copy'));
   });
 
-  test('mlcp: nextJobName finds the next unused numeric name', () => {
+  await test('mlcp: nextJobName finds the next unused numeric name', () => {
     const mlcpDirectory = path.join(home, 'jobnames-test', '.jobs', 'mlcp', 'import');
     assert.equal(nextJobName(mlcpDirectory), '001');
     fs.mkdirSync(mlcpDirectory, { recursive: true });
@@ -577,7 +589,7 @@ printf '200'
     assert.equal(nextJobName(mlcpDirectory), '008');
   });
 
-  test('mlcp: listJobs lists .job files without their extension, sorted, and empty when missing', () => {
+  await test('mlcp: listJobs lists .job files without their extension, sorted, and empty when missing', () => {
     const mlcpDirectory = path.join(home, 'listjobs-test', '.jobs', 'mlcp', 'export');
     assert.deepEqual(listJobs(mlcpDirectory), []);
     fs.mkdirSync(mlcpDirectory, { recursive: true });
@@ -587,22 +599,22 @@ printf '200'
     assert.deepEqual(listJobs(mlcpDirectory), ['001', '002']);
   });
 
-  test('mlcp: MLCP_OPERATIONS lists the three supported operations', () => {
+  await test('mlcp: MLCP_OPERATIONS lists the three supported operations', () => {
     assert.deepEqual(MLCP_OPERATIONS, ['import', 'export', 'copy']);
   });
 
-  test('mlcp: jobTemplate produces operation-specific templates with the job name filled in', () => {
+  await test('mlcp: jobTemplate produces operation-specific templates with the job name filled in', () => {
     assert.match(jobTemplate('import', '001'), /job=001[\s\S]*input_file_path=\.jobs\/mlcp\/import\/data\/001/);
     assert.match(jobTemplate('export', '002'), /job=002[\s\S]*output_file_path=\.jobs\/mlcp\/export\/data\/002/);
     assert.match(jobTemplate('copy', '003'), /job=003[\s\S]*collections=foo,bar/);
   });
 
-  test('mlcp: parseJobFile ignores comments and blank lines, lowercases keys', () => {
+  await test('mlcp: parseJobFile ignores comments and blank lines, lowercases keys', () => {
     const fields = parseJobFile(`# a comment\njob=001\n\nInput_File_Type=archive\n  thread_count = 4  \n`);
     assert.deepEqual(fields, { job: '001', input_file_type: 'archive', thread_count: '4' });
   });
 
-  test('mlcp: classifyJobFields separates meta, typed properties, and extra args, and applies the collections alias', () => {
+  await test('mlcp: classifyJobFields separates meta, typed properties, and extra args, and applies the collections alias', () => {
     const importResult = classifyJobFields('import', { job: '001', env_to: 'prod', collections: 'foo,bar', thread_count: '4', some_future_option: 'x' });
     assert.deepEqual(importResult.meta, { job: '001', env_to: 'prod' });
     assert.deepEqual(importResult.properties, { output_collections: 'foo,bar', thread_count: 4 });
@@ -615,18 +627,18 @@ printf '200'
     assert.equal(copyResult.properties.collection_filter, 'foo');
   });
 
-  test('mlcp: classifyJobFields rejects connection identity fields', () => {
+  await test('mlcp: classifyJobFields rejects connection identity fields', () => {
     assert.throws(() => classifyJobFields('import', { host: 'evil.example.com' }), /connection details always come from/);
     assert.throws(() => classifyJobFields('copy', { output_password: 'hunter2' }), /connection details always come from/);
     assert.throws(() => classifyJobFields('import', { options_file: 'x.txt' }), /connection details always come from/);
   });
 
-  test('mlcp: classifyJobFields rejects malformed booleans and integers', () => {
+  await test('mlcp: classifyJobFields rejects malformed booleans and integers', () => {
     assert.throws(() => classifyJobFields('import', { compress: 'yes' }), /must be true or false/);
     assert.throws(() => classifyJobFields('import', { thread_count: 'four' }), /must be a whole number/);
   });
 
-  test('mlcp: buildMlcpInvocation fills in import connection details and database default', () => {
+  await test('mlcp: buildMlcpInvocation fills in import connection details and database default', () => {
     const envTo = { host: 'localhost', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'content' };
     const invocation = buildMlcpInvocation('import', { input_file_path: 'data/import' }, { envTo });
     assert.equal(invocation.command, 'IMPORT');
@@ -640,19 +652,19 @@ printf '200'
     });
   });
 
-  test('mlcp: buildMlcpInvocation requires input_file_path for import and output_file_path for export', () => {
+  await test('mlcp: buildMlcpInvocation requires input_file_path for import and output_file_path for export', () => {
     const env = { host: 'localhost', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'content' };
     assert.throws(() => buildMlcpInvocation('import', {}, { envTo: env }), /input_file_path/);
     assert.throws(() => buildMlcpInvocation('export', {}, { envFrom: env }), /output_file_path/);
   });
 
-  test('mlcp: buildMlcpInvocation sets ssl for https environments', () => {
+  await test('mlcp: buildMlcpInvocation sets ssl for https environments', () => {
     const envTo = { host: 'ml.example.com', port: '8000', user: 'admin', pass: 'admin', protocol: 'https', content_db: 'content' };
     const invocation = buildMlcpInvocation('import', { input_file_path: 'x' }, { envTo });
     assert.equal(invocation.properties.ssl, true);
   });
 
-  test('mlcp: buildMlcpInvocation builds distinct input_/output_ connection details for copy', () => {
+  await test('mlcp: buildMlcpInvocation builds distinct input_/output_ connection details for copy', () => {
     const envFrom = { host: 'dev.example.com', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'dev-content' };
     const envTo = { host: 'localhost', port: '8010', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'local-content' };
     const invocation = buildMlcpInvocation('copy', { collections: 'foo' }, { envFrom, envTo });
@@ -664,7 +676,21 @@ printf '200'
     assert.equal(invocation.properties.collection_filter, 'foo');
   });
 
-  test('mlcp: resolveEnvironmentsForOperation defaults to the active environment and honors env_from/env_to', () => {
+  await test('mlcp: insecureEntries reports only the hosts that need trust-on-first-use, per operation', () => {
+    const secure = { host: 'a.example.com', port: '8000', insecure: 'false' };
+    const insecure = { host: 'b.example.com', port: '8001', insecure: 'true' };
+
+    assert.deepEqual(insecureEntries('import', { envTo: secure }), []);
+    assert.deepEqual(insecureEntries('import', { envTo: insecure }), [{ host: 'b.example.com', port: '8001' }]);
+    assert.deepEqual(insecureEntries('export', { envFrom: insecure }), [{ host: 'b.example.com', port: '8001' }]);
+    assert.deepEqual(insecureEntries('copy', { envFrom: insecure, envTo: secure }), [{ host: 'b.example.com', port: '8001' }]);
+    assert.deepEqual(insecureEntries('copy', { envFrom: insecure, envTo: insecure }), [
+      { host: 'b.example.com', port: '8001' },
+      { host: 'b.example.com', port: '8001' }
+    ]);
+  });
+
+  await test('mlcp: resolveEnvironmentsForOperation defaults to the active environment and honors env_from/env_to', () => {
     const mlcpEnvHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-env-'));
     const mlcpEnvDirectory = configDirectory(mlcpEnvHome);
     writeEnvironment('active', mlcpEnvDirectory);
@@ -681,13 +707,63 @@ printf '200'
     fs.rmSync(mlcpEnvHome, { recursive: true, force: true });
   });
 
-  test('mlcp: redactedSummary masks password-like properties', () => {
+  await test('trust: trustStorePath and certificateAlias are pure and stable', () => {
+    assert.equal(trustStorePath('/home/user'), path.join('/home/user', '.mlsh', 'trust-store.jks'));
+    assert.equal(certificateAlias('ml.example.com', '8000'), 'ml.example.com_8000');
+    assert.equal(certificateAlias('ml.example.com', 8000), 'ml.example.com_8000');
+    // keytool aliases can't contain characters like ':'; anything unsafe is replaced.
+    assert.equal(certificateAlias('::1', '8000'), '__1_8000');
+  });
+
+  await test('trust: ensureTrustedCertificates is a no-op for an empty list and does not touch the filesystem', async () => {
+    const trustHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-trust-'));
+    const result = await ensureTrustedCertificates([], trustHome);
+    assert.equal(result, null);
+    assert.ok(!fs.existsSync(trustStorePath(trustHome)));
+    fs.rmSync(trustHome, { recursive: true, force: true });
+  });
+
+  if (spawnSync('which', ['openssl']).status === 0 && spawnSync('which', ['keytool']).status === 0) {
+    await (async () => {
+      const trustHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-trust-tls-'));
+      const certDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-trust-cert-'));
+      const keyPath = path.join(certDirectory, 'key.pem');
+      const certPath = path.join(certDirectory, 'cert.pem');
+      spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-keyout', keyPath, '-out', certPath, '-days', '1', '-nodes', '-subj', '/CN=127.0.0.1']);
+
+      const server = tls.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) }, (socket) => socket.end());
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = server.address().port;
+
+      try {
+        await test('trust: ensureTrustedCertificates fetches and imports a real self-signed certificate (trust-on-first-use)', async () => {
+          const trust = await ensureTrustedCertificates([{ host: '127.0.0.1', port }], trustHome);
+          assert.equal(trust.trustStorePath, trustStorePath(trustHome));
+          assert.ok(fs.existsSync(trust.trustStorePath));
+
+          const listing = spawnSync('keytool', ['-list', '-keystore', trust.trustStorePath, '-storepass', trust.trustStorePassword, '-alias', certificateAlias('127.0.0.1', port)]);
+          assert.equal(listing.status, 0, listing.stderr?.toString());
+
+          // Calling again is a no-op (trust-on-first-use, not trust-every-time) - it must not throw or duplicate the alias.
+          await ensureTrustedCertificates([{ host: '127.0.0.1', port }], trustHome);
+        });
+      } finally {
+        server.close();
+        fs.rmSync(trustHome, { recursive: true, force: true });
+        fs.rmSync(certDirectory, { recursive: true, force: true });
+      }
+    })();
+  } else {
+    console.log('- (skipped) trust: ensureTrustedCertificates fetches and imports a real self-signed certificate (openssl/keytool not found)');
+  }
+
+  await test('mlcp: redactedSummary masks password-like properties', () => {
     const summary = redactedSummary({ command: 'IMPORT', properties: { password: 'secret', output_password: 'secret2', input_file_path: 'x' } });
     assert.doesNotMatch(summary, /secret/);
     assert.match(summary, /\*{8}/);
   });
 
-  test('mlcp-tui: buildHeaderRow renders the sidebar and content titles at the requested widths', () => {
+  await test('mlcp-tui: buildHeaderRow renders the sidebar and content titles at the requested widths', () => {
     const header = buildMlcpHeaderRow({ totalWidth: 60, sidebarWidth: 20, sidebarTitle: 'JOB TYPES', contentTitle: 'Select a job type' });
     const plain = stripAnsi(header);
     assert.match(plain, /JOB TYPES/);
@@ -695,7 +771,7 @@ printf '200'
     assert.equal(visibleLength(header), 60);
   });
 
-  test('mlcp-tui: buildStatusLine shows per-stage hints and right-aligned context', () => {
+  await test('mlcp-tui: buildStatusLine shows per-stage hints and right-aligned context', () => {
     const typesLine = stripAnsi(buildMlcpStatusLine({ width: 90, stage: 'types' }));
     assert.match(typesLine, /navigate/);
     assert.match(typesLine, /ENTER.*select/);
@@ -709,7 +785,7 @@ printf '200'
     assert.match(jobViewLine, /last exit: 0/);
   });
 
-  test('mlcp: runs an existing job through the Node dispatcher without prompting, passing options via environment variables', () => {
+  await test('mlcp: runs an existing job through the Node dispatcher without prompting, passing options via environment variables', () => {
     const mlcpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-cli-'));
     const project = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-project-'));
     const gradleRunnerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-runner-'));

@@ -81,11 +81,19 @@ host=localhost
 port=8000
 user=admin
 pass=admin
+insecure=false
 modules_db=modules
 content_db=content
 triggers_db=triggers
 schemas_db=schemas
 ```
+
+Set `insecure=true` to trust a self-signed or internally-issued TLS certificate for that
+environment without needing a known CA - useful for `https` development or internal clusters.
+It's applied automatically wherever that environment is used: `curl`-based commands (`eval`,
+`logs`, `qc`, `backup`) pass `--insecure`, and `mlcp` fetches and trusts that exact server
+certificate once (trust-on-first-use, like SSH host keys) in a small Java trust store under
+`~/.mlsh/trust-store.jks`, used only by MLCP's own JVM.
 
 Useful non-interactive forms:
 

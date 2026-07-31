@@ -23,7 +23,8 @@ export class MarkLogicClient {
   }
 
   authenticatedArgs() {
-    return ['--silent', '--show-error', '--digest', '-u', `${this.environment.user}:${this.environment.pass}`];
+    const insecure = String(this.environment.insecure).toLowerCase() === 'true' ? ['--insecure'] : [];
+    return ['--silent', '--show-error', '--digest', '-u', `${this.environment.user}:${this.environment.pass}`, ...insecure];
   }
 
   async curl(label, args, { timeout = this.timeout } = {}) {

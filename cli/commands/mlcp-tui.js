@@ -149,7 +149,7 @@ export async function runMlcpTui(context, ttyHandle) {
   const createNewJob = async () => {
     suspendForExternalIO();
     try {
-      const { name } = createAndEditJob(currentDirectory(), selectedType, nextJobName(currentDirectory()), { temporary: true });
+      const { name } = createAndEditJob(currentDirectory(), selectedType, nextJobName(currentDirectory()), { temporary: true, editFn: editOnTty });
       jobs = listJobs(currentDirectory());
       jobIndex = clampCursor(jobs.indexOf(name), jobs.length);
       openJob(name);

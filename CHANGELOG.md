@@ -21,9 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests for the installed command route, shell-safe environment generation, password redaction, MLCP copy arguments, and live environment switching inside the interactive shell.
 - Module workspace discovery that survives date changes, with explicit `--workspace` selection and clearer load summaries.
 - `mlsh mlcp import|export|copy [job]`: job-file-driven MLCP runs through a bundled ml-gradle
-  runner (`gradle/mlcp/`). Missing job files open an operation-specific template in
-  `$EDITOR`/`nvim`/`vim`/`vi`; connection details always come from the active MLSH environment (or
-  `env_from`/`env_to` named in the job), never from the job file itself.
+  runner (`gradle/mlcp/`), with jobs stored under `.jobs/mlcp/<operation>/<job>.job`. Missing job
+  files open an operation-specific template in `$EDITOR`/`nvim`/`vim`/`vi`; connection details
+  always come from the active MLSH environment (or `env_from`/`env_to` named in the job), never
+  from the job file itself.
+- `mlsh mlcp` with no arguments: an interactive, full-screen job browser (type -> jobs -> view),
+  matching `mlsh eval`'s picker conventions, with `r` to run, `e` to edit, and `n` to create a job.
 
 ### Removed
 

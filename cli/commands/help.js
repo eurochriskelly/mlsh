@@ -34,15 +34,23 @@ Manage Query Console workspaces.`,
   backup: `Usage: mlsh backup {list|create|delete}
 
 Run the bundled MarkLogic backup operations.`,
-  mlcp: `Usage: mlsh mlcp <import|export|copy> [job]
+  mlcp: `Usage: mlsh mlcp [import|export|copy] [job]
 
-Run MLCP (via ml-gradle) using a job file under .jobs/mlcp/<job>.job in the
-current directory.
+Run MLCP (via ml-gradle) using a job file under .jobs/mlcp/<operation>/<job>.job
+in the current directory.
 
+  mlsh mlcp                  Open an interactive job browser (types -> jobs -> view)
   mlsh mlcp import           Create and edit a new numbered import job, then run it
-  mlsh mlcp import 123       Run .jobs/mlcp/123.job, or create/edit it if missing
+  mlsh mlcp import 123       Run .jobs/mlcp/import/123.job, or create/edit it if missing
   mlsh mlcp export 123       Same, for an export job
   mlsh mlcp copy 123         Same, for a copy job (database to database)
+
+Running 'mlsh mlcp' with no arguments opens an interactive job browser. In a
+real terminal this is a full-screen navigator:
+  [\u2191/\u2193 j/k] navigate      [ENTER] select a type, then a job
+  [n] create a new job in the current type   [r] run the selected job
+  [e] edit it ($EDITOR/nvim/vim/vi)          [ESC] back a level
+  [q] or Ctrl+C to quit
 
 Job files are simple key=value files, edited with $EDITOR/nvim/vim/vi. Each
 operation opens a template with sensible defaults and commented-out options.

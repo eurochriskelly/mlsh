@@ -161,16 +161,31 @@ by appending a line like `{"uri": "/new.xqy"}`.
 files instead of long command lines:
 
 ```bash
+mlsh mlcp                  # open an interactive job browser
 mlsh mlcp import           # create and edit a new numbered import job, then run it
-mlsh mlcp import 123       # run .jobs/mlcp/123.job, or create/edit it if missing
+mlsh mlcp import 123       # run .jobs/mlcp/import/123.job, or create/edit it if missing
 mlsh mlcp export 123       # same, for an export job
 mlsh mlcp copy 123         # same, for a copy job (database to database)
 ```
 
-Job files live at `.jobs/mlcp/<job>.job` in the current directory and are plain `key=value`
-files, opened in `$EDITOR`/`nvim`/`vim`/`vi` (same fallback order as everywhere else in MLSH) when
-missing. Each operation opens a template with sensible defaults and commented-out options, for
-example:
+Running `mlsh mlcp` (or just `mlcp` inside the interactive shell) with no arguments opens a
+full-screen job browser, the same style as `mlsh eval`'s script picker:
+
+```text
+[↑/↓ j/k] navigate      [ENTER] select a type, then a job
+[n] create a new job in the current type   [r] run the selected job
+[e] edit it ($EDITOR/nvim/vim/vi)          [ESC] back a level
+[q] or Ctrl+C to quit
+```
+
+Select a job type on the left (Import, Export, Copy), then a matching job stored under that type
+(or press `n` to create one). Selecting a job shows its file contents on the right; `r` runs it,
+`e` edits it, `q` quits.
+
+Job files live at `.jobs/mlcp/<operation>/<job>.job` in the current directory and are plain
+`key=value` files, opened in `$EDITOR`/`nvim`/`vim`/`vi` (same fallback order as everywhere else in
+MLSH) when missing. Each operation opens a template with sensible defaults and commented-out
+options, for example:
 
 ```properties
 # Configure an MLCP copy job.

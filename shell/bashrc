@@ -57,7 +57,7 @@ mlsh_help() {
   mlsh_command_line 'eval <script> ...' 'Evaluate XQuery or JavaScript'
   mlsh_command_line 'logs <options>' 'Query MarkLogic logs'
   mlsh_command_line 'qc <command>' 'Manage Query Console workspaces'
-  mlsh_command_line 'mlcp <import|export|copy> [job]' 'Run MLCP jobs via ml-gradle'
+  mlsh_command_line 'mlcp [import|export|copy] [job]' 'Run MLCP jobs via ml-gradle (bare = interactive)'
   mlsh_command_line 'corb <args>' 'Run CoRB'
   mlsh_command_line 'modules <command>' 'Manage modules'
   mlsh_command_line 'backup <command>' 'Manage backups'

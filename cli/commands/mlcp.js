@@ -102,8 +102,18 @@ const META_KEYS = new Set(['job', 'env_from', 'env_to']);
 
 const COLLECTIONS_ALIAS_TARGET = { import: 'output_collections', export: 'collection_filter', copy: 'collection_filter' };
 
-export function jobDirectory(cwd = process.cwd()) {
-  return path.join(cwd, '.jobs', 'mlcp');
+export const MLCP_OPERATIONS = ['import', 'export', 'copy'];
+
+export function jobDirectory(cwd = process.cwd(), operation) {
+  return path.join(cwd, '.jobs', 'mlcp', operation);
+}
+
+export function listJobs(directory) {
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory)
+    .filter(file => file.endsWith('.job'))
+    .map(file => file.slice(0, -4))
+    .sort();
 }
 
 export function validateJobName(name) {
@@ -140,7 +150,7 @@ job=${name}
 
 # env_to=local
 # database=content
-input_file_path=.jobs/mlcp/data/${name}
+input_file_path=.jobs/mlcp/import/data/${name}
 input_file_type=archive
 
 # collections=foo,bar
@@ -154,7 +164,7 @@ job=${name}
 
 # env_from=local
 # database=content
-output_file_path=.jobs/mlcp/data/${name}
+output_file_path=.jobs/mlcp/export/data/${name}
 output_type=archive
 
 # collections=foo,bar
@@ -297,7 +307,7 @@ export function redactedSummary({ command, properties }) {
   return `${command} ${JSON.stringify(safe)}`;
 }
 
-function createAndEditJob(directory, operation, name, { temporary = false } = {}) {
+export function createAndEditJob(directory, operation, name, { temporary = false } = {}) {
   fs.mkdirSync(directory, { recursive: true });
   const workingFile = temporary ? path.join(directory, `.new-${process.pid}.job`) : resolveJobFile(directory, name);
   fs.writeFileSync(workingFile, jobTemplate(operation, name));
@@ -325,49 +335,15 @@ function gradlewExecutable(context) {
   return path.join(directory, process.platform === 'win32' ? 'gradlew.bat' : 'gradlew');
 }
 
-const USAGE = `Usage: mlsh mlcp <import|export|copy> [job]
-
-Runs MLCP (via ml-gradle) using a job file under .jobs/mlcp/<job>.job in the
-current directory. If [job] is omitted, or doesn't exist yet, an editor opens
-a template with sensible defaults for the chosen operation.`;
-
-export async function runMlcp(context, args) {
-  const operation = args[0];
-  if (!operation || ['help', '-h', '--help'].includes(operation)) {
-    console.log(USAGE);
-    return 0;
-  }
-  if (!['import', 'export', 'copy'].includes(operation)) {
-    throw new Error(`Unknown mlcp command: ${operation}. Use import, export, or copy.`);
-  }
-
-  const directory = jobDirectory(process.cwd());
-  const jobArgument = args[1];
-  let fields;
-  let name;
-  let created = false;
-
-  if (jobArgument) {
-    const file = resolveJobFile(directory, jobArgument);
-    if (fs.existsSync(file)) {
-      name = jobBaseName(jobArgument);
-      fields = parseJobFile(fs.readFileSync(file, 'utf8'));
-    } else {
-      ({ fields, name } = createAndEditJob(directory, operation, jobBaseName(jobArgument)));
-      created = true;
-    }
-  } else {
-    const generatedName = nextJobName(directory);
-    ({ fields, name } = createAndEditJob(directory, operation, generatedName, { temporary: true }));
-    created = true;
-  }
-
+// Resolves environments, builds the MlcpTask invocation, and runs it via the
+// bundled ml-gradle wrapper. Shared by the direct CLI path and the TUI's
+// 'r' (run) key, so both behave identically.
+export async function executeInvocation(context, operation, name, fields, directory) {
   const environments = resolveEnvironmentsForOperation(operation, { env_from: fields.env_from, env_to: fields.env_to }, context);
   const invocation = buildMlcpInvocation(operation, fields, environments);
 
   console.log(`MLCP job: ${name} (${directory})`);
   context.logger.info(`mlcp job: ${name} ${redactedSummary(invocation)}`);
-  if (created && !(await confirm(`Run this ${operation} job now? (y/n): `))) return 0;
 
   const gradlew = gradlewExecutable(context);
   if (!fs.existsSync(gradlew)) throw new Error(`Bundled MLCP runner not found at ${gradlew}.`);
@@ -389,4 +365,58 @@ export async function runMlcp(context, args) {
   console.log('═══════════════════════════════════════════════════════════');
   console.log(`MLCP completed with exit code: ${result.code}`);
   return result.code;
+}
+
+const USAGE = `Usage: mlsh mlcp [import|export|copy] [job]
+
+Runs MLCP (via ml-gradle) using a job file under .jobs/mlcp/<operation>/<job>.job
+in the current directory. If [job] is omitted, or doesn't exist yet, an editor
+opens a template with sensible defaults for the chosen operation.
+
+Run 'mlsh mlcp' with no arguments for an interactive job browser.`;
+
+export async function runMlcp(context, args) {
+  const operation = args[0];
+
+  if (!operation) {
+    const { openControllingTty } = await import('../lib/tui.js');
+    const controllingTty = openControllingTty();
+    if (controllingTty) {
+      const { runMlcpTui } = await import('./mlcp-tui.js');
+      return runMlcpTui(context, controllingTty);
+    }
+    const { lineBasedInteractiveMlcp } = await import('./mlcp-line.js');
+    return lineBasedInteractiveMlcp(context);
+  }
+  if (['help', '-h', '--help'].includes(operation)) {
+    console.log(USAGE);
+    return 0;
+  }
+  if (!MLCP_OPERATIONS.includes(operation)) {
+    throw new Error(`Unknown mlcp command: ${operation}. Use import, export, or copy.`);
+  }
+
+  const directory = jobDirectory(process.cwd(), operation);
+  const jobArgument = args[1];
+  let fields;
+  let name;
+  let created = false;
+
+  if (jobArgument) {
+    const file = resolveJobFile(directory, jobArgument);
+    if (fs.existsSync(file)) {
+      name = jobBaseName(jobArgument);
+      fields = parseJobFile(fs.readFileSync(file, 'utf8'));
+    } else {
+      ({ fields, name } = createAndEditJob(directory, operation, jobBaseName(jobArgument)));
+      created = true;
+    }
+  } else {
+    const generatedName = nextJobName(directory);
+    ({ fields, name } = createAndEditJob(directory, operation, generatedName, { temporary: true }));
+    created = true;
+  }
+
+  if (created && !(await confirm(`Run this ${operation} job now? (y/n): `))) return 0;
+  return executeInvocation(context, operation, name, fields, directory);
 }

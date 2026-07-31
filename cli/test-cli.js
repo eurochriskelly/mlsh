@@ -26,6 +26,8 @@ import {
   jobBaseName,
   jobDirectory,
   jobTemplate,
+  listJobs,
+  MLCP_OPERATIONS,
   nextJobName,
   parseJobFile,
   redactedSummary,
@@ -33,6 +35,7 @@ import {
   resolveJobFile,
   validateJobName
 } from './commands/mlcp.js';
+import { buildHeaderRow as buildMlcpHeaderRow, buildStatusLine as buildMlcpStatusLine } from './commands/mlcp-tui.js';
 import { createContext } from './main.js';
 import {
   activateEnvironment,
@@ -554,17 +557,18 @@ printf '200'
   test('mlcp: jobBaseName and resolveJobFile normalise the .job suffix', () => {
     assert.equal(jobBaseName('123.job'), '123');
     assert.equal(jobBaseName('123'), '123');
-    const mlcpDirectory = jobDirectory(home);
+    const mlcpDirectory = jobDirectory(home, 'import');
     assert.equal(resolveJobFile(mlcpDirectory, '123'), path.join(mlcpDirectory, '123.job'));
     assert.equal(resolveJobFile(mlcpDirectory, '123.job'), path.join(mlcpDirectory, '123.job'));
   });
 
-  test('mlcp: jobDirectory resolves under .jobs/mlcp relative to the given directory', () => {
-    assert.equal(jobDirectory('/tmp/project'), path.join('/tmp/project', '.jobs', 'mlcp'));
+  test('mlcp: jobDirectory resolves under .jobs/mlcp/<operation> relative to the given directory', () => {
+    assert.equal(jobDirectory('/tmp/project', 'import'), path.join('/tmp/project', '.jobs', 'mlcp', 'import'));
+    assert.equal(jobDirectory('/tmp/project', 'copy'), path.join('/tmp/project', '.jobs', 'mlcp', 'copy'));
   });
 
   test('mlcp: nextJobName finds the next unused numeric name', () => {
-    const mlcpDirectory = path.join(home, 'jobnames-test', '.jobs', 'mlcp');
+    const mlcpDirectory = path.join(home, 'jobnames-test', '.jobs', 'mlcp', 'import');
     assert.equal(nextJobName(mlcpDirectory), '001');
     fs.mkdirSync(mlcpDirectory, { recursive: true });
     fs.writeFileSync(path.join(mlcpDirectory, '001.job'), '');
@@ -573,9 +577,23 @@ printf '200'
     assert.equal(nextJobName(mlcpDirectory), '008');
   });
 
+  test('mlcp: listJobs lists .job files without their extension, sorted, and empty when missing', () => {
+    const mlcpDirectory = path.join(home, 'listjobs-test', '.jobs', 'mlcp', 'export');
+    assert.deepEqual(listJobs(mlcpDirectory), []);
+    fs.mkdirSync(mlcpDirectory, { recursive: true });
+    fs.writeFileSync(path.join(mlcpDirectory, '002.job'), '');
+    fs.writeFileSync(path.join(mlcpDirectory, '001.job'), '');
+    fs.writeFileSync(path.join(mlcpDirectory, 'notes.txt'), '');
+    assert.deepEqual(listJobs(mlcpDirectory), ['001', '002']);
+  });
+
+  test('mlcp: MLCP_OPERATIONS lists the three supported operations', () => {
+    assert.deepEqual(MLCP_OPERATIONS, ['import', 'export', 'copy']);
+  });
+
   test('mlcp: jobTemplate produces operation-specific templates with the job name filled in', () => {
-    assert.match(jobTemplate('import', '001'), /job=001[\s\S]*input_file_path=\.jobs\/mlcp\/data\/001/);
-    assert.match(jobTemplate('export', '002'), /job=002[\s\S]*output_file_path=\.jobs\/mlcp\/data\/002/);
+    assert.match(jobTemplate('import', '001'), /job=001[\s\S]*input_file_path=\.jobs\/mlcp\/import\/data\/001/);
+    assert.match(jobTemplate('export', '002'), /job=002[\s\S]*output_file_path=\.jobs\/mlcp\/export\/data\/002/);
     assert.match(jobTemplate('copy', '003'), /job=003[\s\S]*collections=foo,bar/);
   });
 
@@ -669,6 +687,28 @@ printf '200'
     assert.match(summary, /\*{8}/);
   });
 
+  test('mlcp-tui: buildHeaderRow renders the sidebar and content titles at the requested widths', () => {
+    const header = buildMlcpHeaderRow({ totalWidth: 60, sidebarWidth: 20, sidebarTitle: 'JOB TYPES', contentTitle: 'Select a job type' });
+    const plain = stripAnsi(header);
+    assert.match(plain, /JOB TYPES/);
+    assert.match(plain, /Select a job type/);
+    assert.equal(visibleLength(header), 60);
+  });
+
+  test('mlcp-tui: buildStatusLine shows per-stage hints and right-aligned context', () => {
+    const typesLine = stripAnsi(buildMlcpStatusLine({ width: 90, stage: 'types' }));
+    assert.match(typesLine, /navigate/);
+    assert.match(typesLine, /ENTER.*select/);
+
+    const jobListLine = stripAnsi(buildMlcpStatusLine({ width: 90, stage: 'jobList', selectedType: 'import' }));
+    assert.match(jobListLine, /new job/);
+    assert.match(jobListLine, /Import/);
+
+    const jobViewLine = stripAnsi(buildMlcpStatusLine({ width: 90, stage: 'jobView', selectedType: 'copy', lastRunCode: 0 }));
+    assert.match(jobViewLine, /\[r\] run/);
+    assert.match(jobViewLine, /last exit: 0/);
+  });
+
   test('mlcp: runs an existing job through the Node dispatcher without prompting, passing options via environment variables', () => {
     const mlcpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-cli-'));
     const project = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-project-'));
@@ -678,7 +718,7 @@ printf '200'
       writeEnvironment('dev', envDirectory);
       activateEnvironment('dev', envDirectory, mlcpHome);
 
-      const jobsDirectory = path.join(project, '.jobs', 'mlcp');
+      const jobsDirectory = path.join(project, '.jobs', 'mlcp', 'import');
       fs.mkdirSync(jobsDirectory, { recursive: true });
       fs.writeFileSync(path.join(jobsDirectory, '123.job'), 'job=123\ninput_file_path=data/import\ninput_file_type=archive\ncollections=foo,bar\n');
 

@@ -62,7 +62,7 @@ Requirements:
 - Bash for the interactive MLSH session
 - `curl` for digest-authenticated MarkLogic requests
 - Java and the CoRB/XCC JARs when using `corb`
-- MLCP when using `mlcp`
+- A JDK (17 or later) when using `mlcp`; MLSH bundles ml-gradle and downloads Gradle and MLCP on first use
 
 ## Environments
 
@@ -109,7 +109,7 @@ Legacy `~/.mlshrc` and `~/.mlshrc.json` configurations are migrated automaticall
 | `qc` | Manage Query Console workspaces |
 | `modules` | Find, download, edit, load, or reset modules |
 | `backup` | Run bundled backup operations |
-| `mlcp` | Run MLCP with active-environment connection defaults |
+| `mlcp` | Run MLCP import/export/copy jobs via a bundled ml-gradle runner |
 | `corb` | Run CoRB with an active-environment connection URI |
 | `session-log` | Locate, display, follow, or clear MLSH logs |
 | `debug` | Change diagnostic verbosity inside the MLSH shell |
@@ -154,18 +154,59 @@ This makes it easy to hand-add a record (for example after `modules clone`)
 by appending a line like `{"uri": "/new.xqy"}`.
 
 
-### Run MLCP and CoRB
+### Run MLCP
+
+`mlcp` runs [MarkLogic Content Pump](https://docs.marklogic.com/guide/mlcp) through a bundled
+[ml-gradle](https://github.com/marklogic/ml-gradle) runner (`gradle/mlcp/`), driven by simple job
+files instead of long command lines:
+
+```bash
+mlsh mlcp import           # create and edit a new numbered import job, then run it
+mlsh mlcp import 123       # run .jobs/mlcp/123.job, or create/edit it if missing
+mlsh mlcp export 123       # same, for an export job
+mlsh mlcp copy 123         # same, for a copy job (database to database)
+```
+
+Job files live at `.jobs/mlcp/<job>.job` in the current directory and are plain `key=value`
+files, opened in `$EDITOR`/`nvim`/`vim`/`vi` (same fallback order as everywhere else in MLSH) when
+missing. Each operation opens a template with sensible defaults and commented-out options, for
+example:
+
+```properties
+# Configure an MLCP copy job.
+job=001
+
+# Both default to the active environment.
+# env_from=development
+# env_to=local
+
+collections=foo,bar
+```
+
+Connection details (host, port, credentials) always come from MLSH environments - either the
+active one, or the `env_from`/`env_to` environment named in the job - never from the job file
+itself, so job files are safe to commit alongside a project. `collections` is a convenience alias
+for the underlying MLCP option (`output_collections` for import, `collection_filter` for export
+and copy); any other MLCP option can be set directly by its usual name (e.g. `thread_count=8`).
+
+This makes it easy to export data from one environment and import it into another - run an
+`export` job once, then an `import` job repeatedly while iterating - or to `copy` directly from
+one environment to another in a single step.
+
+The first `mlcp` run downloads Gradle and MLCP automatically (both are cached afterward), so only
+a JDK (17 or later) needs to be installed beforehand.
+
+### Run CoRB
 
 By default, MLSH looks under `~/.mlsh.d/dependencies/`:
 
 ```text
 ~/.mlsh.d/dependencies/
 ├── corb.jar
-├── xcc.jar
-└── mlcp/bin/mlcp.sh
+└── xcc.jar
 ```
 
-Custom locations can be supplied through `CORB_JAR`, `XCC_JAR`, and `MLCP_PATH`.
+Custom locations can be supplied through `CORB_JAR` and `XCC_JAR`.
 
 ## Logs
 

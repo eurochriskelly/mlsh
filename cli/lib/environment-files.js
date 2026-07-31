@@ -97,6 +97,14 @@ export function loadActiveEnvironment(home = os.homedir(), processEnvironment = 
   return { ...DEFAULTS, ...stored, ...fromProcess, name: fromProcess.name || stored.name || selected };
 }
 
+export function loadNamedEnvironment(name, home = os.homedir()) {
+  validateEnvironmentName(name);
+  const directory = configDirectory(home);
+  const file = environmentPath(name, directory);
+  if (!fs.existsSync(file)) throw new Error(`Environment '${name}' does not exist. Run 'mlsh env' to create it.`);
+  return { ...defaultEnvironment(name), ...parseEnvironment(fs.readFileSync(file, 'utf8')), name };
+}
+
 export function environmentVariables(environment) {
   if (!environment) return {};
   return Object.fromEntries(Object.entries(PROCESS_KEYS).map(([variable, key]) => [variable, String(environment[key] ?? '')]));

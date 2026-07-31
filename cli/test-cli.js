@@ -19,8 +19,20 @@ import {
   sidebarWindow
 } from './commands/eval-tui.js';
 import { openControllingTty, paintRow, padTo, truncateVisible, visibleLength, watchResize } from './lib/tui.js';
-import { mlcpConnectionArgs } from './commands/external.js';
 import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
+import {
+  buildMlcpInvocation,
+  classifyJobFields,
+  jobBaseName,
+  jobDirectory,
+  jobTemplate,
+  nextJobName,
+  parseJobFile,
+  redactedSummary,
+  resolveEnvironmentsForOperation,
+  resolveJobFile,
+  validateJobName
+} from './commands/mlcp.js';
 import { createContext } from './main.js';
 import {
   activateEnvironment,
@@ -482,14 +494,6 @@ printf '200'
      assert.ok(fs.existsSync(path.join(workspaceRoot, todayName)), `Should create ${todayName}`);
    });
 
-   test('uses MLCP copy-specific connection arguments', () => {
-    const environment = { host: 'localhost', port: '8000', user: 'admin', pass: 'secret' };
-    const args = mlcpConnectionArgs('copy', environment);
-    assert.deepEqual(args.slice(0, 8), ['-input_host', 'localhost', '-input_port', '8000', '-input_username', 'admin', '-input_password', 'secret']);
-    assert.ok(args.includes('-output_host'));
-    assert.equal(mlcpConnectionArgs('help', environment).length, 0);
-  });
-
   test('runs eval through the Node dispatcher and preserves argument boundaries', () => {
     const binDirectory = path.join(home, 'bin');
     fs.mkdirSync(binDirectory);
@@ -539,6 +543,174 @@ printf '200'
     assert.equal(context.environment.name, 'dev');
     assert.equal(context.environment.host, 'localhost');
   });
+
+  test('mlcp: validateJobName accepts safe names and rejects unsafe ones', () => {
+    assert.doesNotThrow(() => validateJobName('123'));
+    assert.doesNotThrow(() => validateJobName('nightly-export_2'));
+    assert.throws(() => validateJobName('../etc'), /letters, numbers/);
+    assert.throws(() => validateJobName(''), /letters, numbers/);
+  });
+
+  test('mlcp: jobBaseName and resolveJobFile normalise the .job suffix', () => {
+    assert.equal(jobBaseName('123.job'), '123');
+    assert.equal(jobBaseName('123'), '123');
+    const mlcpDirectory = jobDirectory(home);
+    assert.equal(resolveJobFile(mlcpDirectory, '123'), path.join(mlcpDirectory, '123.job'));
+    assert.equal(resolveJobFile(mlcpDirectory, '123.job'), path.join(mlcpDirectory, '123.job'));
+  });
+
+  test('mlcp: jobDirectory resolves under .jobs/mlcp relative to the given directory', () => {
+    assert.equal(jobDirectory('/tmp/project'), path.join('/tmp/project', '.jobs', 'mlcp'));
+  });
+
+  test('mlcp: nextJobName finds the next unused numeric name', () => {
+    const mlcpDirectory = path.join(home, 'jobnames-test', '.jobs', 'mlcp');
+    assert.equal(nextJobName(mlcpDirectory), '001');
+    fs.mkdirSync(mlcpDirectory, { recursive: true });
+    fs.writeFileSync(path.join(mlcpDirectory, '001.job'), '');
+    fs.writeFileSync(path.join(mlcpDirectory, '007.job'), '');
+    fs.writeFileSync(path.join(mlcpDirectory, 'nightly.job'), '');
+    assert.equal(nextJobName(mlcpDirectory), '008');
+  });
+
+  test('mlcp: jobTemplate produces operation-specific templates with the job name filled in', () => {
+    assert.match(jobTemplate('import', '001'), /job=001[\s\S]*input_file_path=\.jobs\/mlcp\/data\/001/);
+    assert.match(jobTemplate('export', '002'), /job=002[\s\S]*output_file_path=\.jobs\/mlcp\/data\/002/);
+    assert.match(jobTemplate('copy', '003'), /job=003[\s\S]*collections=foo,bar/);
+  });
+
+  test('mlcp: parseJobFile ignores comments and blank lines, lowercases keys', () => {
+    const fields = parseJobFile(`# a comment\njob=001\n\nInput_File_Type=archive\n  thread_count = 4  \n`);
+    assert.deepEqual(fields, { job: '001', input_file_type: 'archive', thread_count: '4' });
+  });
+
+  test('mlcp: classifyJobFields separates meta, typed properties, and extra args, and applies the collections alias', () => {
+    const importResult = classifyJobFields('import', { job: '001', env_to: 'prod', collections: 'foo,bar', thread_count: '4', some_future_option: 'x' });
+    assert.deepEqual(importResult.meta, { job: '001', env_to: 'prod' });
+    assert.deepEqual(importResult.properties, { output_collections: 'foo,bar', thread_count: 4 });
+    assert.deepEqual(importResult.extraArgs, ['-some_future_option', 'x']);
+
+    const exportResult = classifyJobFields('export', { collections: 'foo' });
+    assert.equal(exportResult.properties.collection_filter, 'foo');
+
+    const copyResult = classifyJobFields('copy', { collections: 'foo' });
+    assert.equal(copyResult.properties.collection_filter, 'foo');
+  });
+
+  test('mlcp: classifyJobFields rejects connection identity fields', () => {
+    assert.throws(() => classifyJobFields('import', { host: 'evil.example.com' }), /connection details always come from/);
+    assert.throws(() => classifyJobFields('copy', { output_password: 'hunter2' }), /connection details always come from/);
+    assert.throws(() => classifyJobFields('import', { options_file: 'x.txt' }), /connection details always come from/);
+  });
+
+  test('mlcp: classifyJobFields rejects malformed booleans and integers', () => {
+    assert.throws(() => classifyJobFields('import', { compress: 'yes' }), /must be true or false/);
+    assert.throws(() => classifyJobFields('import', { thread_count: 'four' }), /must be a whole number/);
+  });
+
+  test('mlcp: buildMlcpInvocation fills in import connection details and database default', () => {
+    const envTo = { host: 'localhost', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'content' };
+    const invocation = buildMlcpInvocation('import', { input_file_path: 'data/import' }, { envTo });
+    assert.equal(invocation.command, 'IMPORT');
+    assert.deepEqual(invocation.properties, {
+      database: 'content',
+      input_file_path: 'data/import',
+      host: 'localhost',
+      port: 8000,
+      username: 'admin',
+      password: 'admin'
+    });
+  });
+
+  test('mlcp: buildMlcpInvocation requires input_file_path for import and output_file_path for export', () => {
+    const env = { host: 'localhost', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'content' };
+    assert.throws(() => buildMlcpInvocation('import', {}, { envTo: env }), /input_file_path/);
+    assert.throws(() => buildMlcpInvocation('export', {}, { envFrom: env }), /output_file_path/);
+  });
+
+  test('mlcp: buildMlcpInvocation sets ssl for https environments', () => {
+    const envTo = { host: 'ml.example.com', port: '8000', user: 'admin', pass: 'admin', protocol: 'https', content_db: 'content' };
+    const invocation = buildMlcpInvocation('import', { input_file_path: 'x' }, { envTo });
+    assert.equal(invocation.properties.ssl, true);
+  });
+
+  test('mlcp: buildMlcpInvocation builds distinct input_/output_ connection details for copy', () => {
+    const envFrom = { host: 'dev.example.com', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'dev-content' };
+    const envTo = { host: 'localhost', port: '8010', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'local-content' };
+    const invocation = buildMlcpInvocation('copy', { collections: 'foo' }, { envFrom, envTo });
+    assert.equal(invocation.command, 'COPY');
+    assert.equal(invocation.properties.input_host, 'dev.example.com');
+    assert.equal(invocation.properties.output_host, 'localhost');
+    assert.equal(invocation.properties.input_database, 'dev-content');
+    assert.equal(invocation.properties.output_database, 'local-content');
+    assert.equal(invocation.properties.collection_filter, 'foo');
+  });
+
+  test('mlcp: resolveEnvironmentsForOperation defaults to the active environment and honors env_from/env_to', () => {
+    const mlcpEnvHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-env-'));
+    const mlcpEnvDirectory = configDirectory(mlcpEnvHome);
+    writeEnvironment('active', mlcpEnvDirectory);
+    writeEnvironment('other', mlcpEnvDirectory);
+    fs.writeFileSync(path.join(mlcpEnvDirectory, 'other.env'), 'name=other\nhost=other.example.com\nport=8000\nuser=admin\npass=admin\ncontent_db=other-content\n');
+    const context = { home: mlcpEnvHome, environment: { name: 'active', host: 'localhost', content_db: 'content' } };
+
+    const defaulted = resolveEnvironmentsForOperation('import', {}, context);
+    assert.equal(defaulted.envTo.name, 'active');
+
+    const overridden = resolveEnvironmentsForOperation('import', { env_to: 'other' }, context);
+    assert.equal(overridden.envTo.host, 'other.example.com');
+
+    fs.rmSync(mlcpEnvHome, { recursive: true, force: true });
+  });
+
+  test('mlcp: redactedSummary masks password-like properties', () => {
+    const summary = redactedSummary({ command: 'IMPORT', properties: { password: 'secret', output_password: 'secret2', input_file_path: 'x' } });
+    assert.doesNotMatch(summary, /secret/);
+    assert.match(summary, /\*{8}/);
+  });
+
+  test('mlcp: runs an existing job through the Node dispatcher without prompting, passing options via environment variables', () => {
+    const mlcpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-cli-'));
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-project-'));
+    const gradleRunnerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-mlcp-runner-'));
+    try {
+      const envDirectory = configDirectory(mlcpHome);
+      writeEnvironment('dev', envDirectory);
+      activateEnvironment('dev', envDirectory, mlcpHome);
+
+      const jobsDirectory = path.join(project, '.jobs', 'mlcp');
+      fs.mkdirSync(jobsDirectory, { recursive: true });
+      fs.writeFileSync(path.join(jobsDirectory, '123.job'), 'job=123\ninput_file_path=data/import\ninput_file_type=archive\ncollections=foo,bar\n');
+
+      const capturedEnvPath = path.join(gradleRunnerDir, 'captured-env.json');
+      const fakeGradlew = path.join(gradleRunnerDir, 'gradlew');
+      fs.writeFileSync(fakeGradlew, `#!/bin/sh
+node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({command: process.env.MLSH_MLCP_COMMAND, options: JSON.parse(process.env.MLSH_MLCP_OPTIONS_JSON), extra: JSON.parse(process.env.MLSH_MLCP_EXTRA_ARGS_JSON)}))" "${capturedEnvPath}"
+`);
+      fs.chmodSync(fakeGradlew, 0o755);
+
+      const result = spawnSync(process.execPath, [path.resolve('bin/mlsh'), 'mlcp', 'import', '123'], {
+        cwd: project,
+        env: { ...process.env, HOME: mlcpHome, MLSH_MLCP_RUNNER_DIR: gradleRunnerDir },
+        encoding: 'utf8'
+      });
+      assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+      assert.match(result.stdout, /MLCP job: 123/);
+      const captured = JSON.parse(fs.readFileSync(capturedEnvPath, 'utf8'));
+      assert.equal(captured.command, 'IMPORT');
+      assert.equal(captured.options.input_file_path, 'data/import');
+      assert.equal(captured.options.output_collections, 'foo,bar');
+      assert.equal(captured.options.host, 'localhost');
+      assert.equal(captured.options.username, 'admin');
+      assert.equal(captured.options.password, 'admin');
+      assert.deepEqual(captured.extra, []);
+    } finally {
+      fs.rmSync(mlcpHome, { recursive: true, force: true });
+      fs.rmSync(project, { recursive: true, force: true });
+      fs.rmSync(gradleRunnerDir, { recursive: true, force: true });
+    }
+  });
+
 } finally {
   fs.rmSync(home, { recursive: true, force: true });
 }

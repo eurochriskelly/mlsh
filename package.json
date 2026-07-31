@@ -38,6 +38,7 @@
     "cli/env-manager.js",
     "cli/commands/",
     "cli/lib/",
+    "gradle/mlcp/",
     "scripts/eval/",
     "scripts/backup/",
     "shell/",

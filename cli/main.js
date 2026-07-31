@@ -5,10 +5,11 @@ import { loadActiveEnvironment } from './lib/environment-files.js';
 import { createLogger, prepareLogFile } from './lib/logger.js';
 import { MarkLogicClient } from './lib/marklogic.js';
 import { runBackup } from './commands/backup.js';
-import { runCorb, runMlcp } from './commands/external.js';
+import { runCorb } from './commands/external.js';
 import { runEval } from './commands/eval.js';
 import { showHelp } from './commands/help.js';
 import { runLogs } from './commands/logs.js';
+import { runMlcp } from './commands/mlcp.js';
 import { runModules } from './commands/modules.js';
 import { runQconsole } from './commands/qconsole.js';
 

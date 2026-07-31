@@ -1,0 +1,50 @@
+// MLSH's bundled MLCP runner. This project exists solely so that `mlsh mlcp`
+// can drive MarkLogic Content Pump through ml-gradle's MlcpTask, following the
+// pattern documented at https://github.com/marklogic/ml-gradle (see
+// examples/mlcp-project). MLSH's Node code (cli/commands/mlcp.js) resolves job
+// files and environments, then invokes `gradlew mlshMlcp` with two environment
+// variables:
+//
+//   MLSH_MLCP_COMMAND            "IMPORT", "EXPORT", or "COPY"
+//   MLSH_MLCP_OPTIONS_JSON       JSON object of MlcpTask property assignments
+//   MLSH_MLCP_EXTRA_ARGS_JSON    JSON array of extra "-option value" mlcp args
+//
+// Credentials and connection details always flow through these environment
+// variables at run time; they are never written to disk or passed as
+// visible command-line arguments.
+import groovy.json.JsonSlurper
+
+plugins {
+	id "com.marklogic.ml-gradle" version "6.2.0"
+}
+
+repositories {
+	mavenCentral()
+}
+
+configurations {
+	mlcp
+}
+
+dependencies {
+	mlcp "com.marklogic:mlcp:12.0.1"
+
+	// mlcp 11.2+ dropped logback as a direct dependency; without it, mlcp
+	// prints no logging output at all.
+	mlcp "ch.qos.logback:logback-classic:1.5.32"
+}
+
+tasks.register("mlshMlcp", com.marklogic.gradle.task.MlcpTask) {
+	classpath = configurations.mlcp
+	command = System.getenv("MLSH_MLCP_COMMAND") ?: "IMPORT"
+
+	def optionsJson = System.getenv("MLSH_MLCP_OPTIONS_JSON") ?: "{}"
+	def options = new JsonSlurper().parseText(optionsJson)
+	options.each { key, value -> setProperty(key.toString(), value) }
+
+	def extraArgsJson = System.getenv("MLSH_MLCP_EXTRA_ARGS_JSON") ?: "[]"
+	def extraArgs = new JsonSlurper().parseText(extraArgsJson)
+	if (extraArgs) {
+		args = extraArgs.collect { it.toString() }
+	}
+}

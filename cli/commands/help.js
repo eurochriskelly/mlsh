@@ -34,9 +34,20 @@ Manage Query Console workspaces.`,
   backup: `Usage: mlsh backup {list|create|delete}
 
 Run the bundled MarkLogic backup operations.`,
-  mlcp: `Usage: mlsh mlcp <command> [options]
+  mlcp: `Usage: mlsh mlcp <import|export|copy> [job]
 
-Run MLCP with connection defaults from the active MLSH environment.`,
+Run MLCP (via ml-gradle) using a job file under .jobs/mlcp/<job>.job in the
+current directory.
+
+  mlsh mlcp import           Create and edit a new numbered import job, then run it
+  mlsh mlcp import 123       Run .jobs/mlcp/123.job, or create/edit it if missing
+  mlsh mlcp export 123       Same, for an export job
+  mlsh mlcp copy 123         Same, for a copy job (database to database)
+
+Job files are simple key=value files, edited with $EDITOR/nvim/vim/vi. Each
+operation opens a template with sensible defaults and commented-out options.
+Connection details always come from the active MLSH environment (or the
+env_from/env_to fields in the job) - never from the job file itself.`,
   corb: `Usage: mlsh corb [options]
 
 Run CoRB with connection defaults from the active MLSH environment.`,
@@ -61,7 +72,7 @@ Commands:
   logs <command>              Query MarkLogic logs
   qc <command>                Manage Query Console workspaces
   modules <command>           Download, edit, and load modules
-  mlcp <args>                 Run MarkLogic Content Pump
+  mlcp <import|export|copy>   Run MLCP jobs via ml-gradle
   corb <args>                 Run CoRB
   backup <command>            Manage backups
   session-log [transcript]    Locate or view MLSH logs

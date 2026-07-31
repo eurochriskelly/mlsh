@@ -2,19 +2,22 @@
 // can drive MarkLogic Content Pump through ml-gradle's MlcpTask, following the
 // pattern documented at https://github.com/marklogic/ml-gradle (see
 // examples/mlcp-project). MLSH's Node code (cli/commands/mlcp.js) resolves job
-// files and environments, then invokes `gradlew mlshMlcp` with two environment
-// variables:
+// files and environments, then invokes `gradlew --no-daemon mlshMlcp` with
+// Gradle project properties (-P, not environment variables - env vars are
+// part of a Gradle daemon's identity/reuse fingerprint, and --no-daemon plus
+// -P keeps every single invocation fully deterministic and easy to reason
+// about, which matters a lot when debugging a connection problem):
 //
-//   MLSH_MLCP_COMMAND            "IMPORT", "EXPORT", or "COPY"
-//   MLSH_MLCP_OPTIONS_JSON       JSON object of MlcpTask property assignments
-//   MLSH_MLCP_EXTRA_ARGS_JSON    JSON array of extra "-option value" mlcp args
-//   MLSH_MLCP_JVM_ARGS_JSON      JSON array of extra JVM args for mlcp's forked
-//                                process (e.g. a per-environment trust store,
-//                                for environments configured with insecure=true)
+//   mlsh.mlcp.command      "IMPORT", "EXPORT", or "COPY"
+//   mlsh.mlcp.options      JSON object of MlcpTask property assignments
+//   mlsh.mlcp.extraArgs    JSON array of extra "-option value" mlcp args
+//   mlsh.mlcp.jvmArgs      JSON array of extra JVM args for mlcp's forked
+//                          process (e.g. a per-environment trust store, for
+//                          environments configured with insecure=true)
 //
-// Credentials and connection details always flow through these environment
-// variables at run time; they are never written to disk or passed as
-// visible command-line arguments.
+// Credentials and connection details always flow through these properties at
+// run time; they are never written to disk or passed as visible arguments to
+// mlsh itself.
 import groovy.json.JsonSlurper
 
 plugins {
@@ -45,20 +48,20 @@ dependencies {
 
 tasks.register("mlshMlcp", com.marklogic.gradle.task.MlcpTask) {
 	classpath = configurations.mlcp
-	command = System.getenv("MLSH_MLCP_COMMAND") ?: "IMPORT"
+	command = (findProperty("mlsh.mlcp.command") ?: "IMPORT").toString()
 
-	def optionsJson = System.getenv("MLSH_MLCP_OPTIONS_JSON") ?: "{}"
-	def options = new JsonSlurper().parseText(optionsJson)
+	def optionsJson = findProperty("mlsh.mlcp.options") ?: "{}"
+	def options = new JsonSlurper().parseText(optionsJson.toString())
 	options.each { key, value -> setProperty(key.toString(), value) }
 
-	def extraArgsJson = System.getenv("MLSH_MLCP_EXTRA_ARGS_JSON") ?: "[]"
-	def extraArgs = new JsonSlurper().parseText(extraArgsJson)
+	def extraArgsJson = findProperty("mlsh.mlcp.extraArgs") ?: "[]"
+	def extraArgs = new JsonSlurper().parseText(extraArgsJson.toString())
 	if (extraArgs) {
 		args = extraArgs.collect { it.toString() }
 	}
 
-	def jvmArgsJson = System.getenv("MLSH_MLCP_JVM_ARGS_JSON") ?: "[]"
-	def extraJvmArgs = new JsonSlurper().parseText(jvmArgsJson)
+	def jvmArgsJson = findProperty("mlsh.mlcp.jvmArgs") ?: "[]"
+	def extraJvmArgs = new JsonSlurper().parseText(jvmArgsJson.toString())
 	if (extraJvmArgs) {
 		jvmArgs = extraJvmArgs.collect { it.toString() }
 	}

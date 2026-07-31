@@ -393,55 +393,109 @@ export function mlcpLogPath(home, operation, name) {
 export async function executeInvocation(context, operation, name, fields, directory, { logFile } = {}) {
   const environments = resolveEnvironmentsForOperation(operation, { env_from: fields.env_from, env_to: fields.env_to }, context);
   const invocation = buildMlcpInvocation(operation, fields, environments);
-
-  console.log(`MLCP job: ${name} (${directory})`);
   context.logger.info(`mlcp job: ${name} ${redactedSummary(invocation)}`);
-  for (const [role, environment] of Object.entries(environments)) {
-    if (environment) console.log(`  ${role}: ${environment.name} - ${environment.protocol}://${environment.host}:${environment.port} (insecure=${isInsecure(environment)})`);
-  }
 
   const gradlew = gradlewExecutable(context);
   if (!fs.existsSync(gradlew)) throw new Error(`Bundled MLCP runner not found at ${gradlew}.`);
 
   const untrustedEntries = insecureEntries(operation, environments);
   let jvmArgs = [];
+  let trust = null;
   if (untrustedEntries.length) {
-    console.log(`Trusting TLS certificate for ${untrustedEntries.map(entry => `${entry.host}:${entry.port}`).join(', ')} (insecure=true)...`);
-    const trust = await ensureTrustedCertificates(untrustedEntries, context.home);
+    trust = await ensureTrustedCertificates(untrustedEntries, context.home);
     if (trust) {
       jvmArgs = [
         `-Djavax.net.ssl.trustStore=${trust.trustStorePath}`,
         `-Djavax.net.ssl.trustStorePassword=${trust.trustStorePassword}`,
         `-Djavax.net.ssl.trustStoreType=${trust.trustStoreType}`
       ];
-      console.log(`Trust store ready: ${trust.trustStorePath} (${trust.trustStoreType})`);
     }
   }
-
-  const env = {
-    ...context.processEnvironment,
-    MLSH_MLCP_COMMAND: invocation.command,
-    MLSH_MLCP_OPTIONS_JSON: JSON.stringify(invocation.properties),
-    MLSH_MLCP_EXTRA_ARGS_JSON: JSON.stringify(invocation.extraArgs),
-    MLSH_MLCP_JVM_ARGS_JSON: JSON.stringify(jvmArgs)
-  };
 
   const resolvedLogFile = logFile || mlcpLogPath(context.home, operation, name);
   fs.mkdirSync(path.dirname(resolvedLogFile), { recursive: true });
 
-  console.log(`Running MLCP ${invocation.command} via ml-gradle (first run downloads Gradle and MLCP)...`);
-  console.log(`Full output is also being written to: ${resolvedLogFile}`);
-  console.log('═══════════════════════════════════════════════════════════');
-  const result = await runProcess(gradlew, ['--quiet', '--console=plain', 'mlshMlcp'], {
+  const header = diagnosticsHeader({ name, directory, invocation, environments, untrustedEntries, trust, jvmArgs, logFile: resolvedLogFile });
+  console.log(header);
+  fs.writeFileSync(resolvedLogFile, `${header}\n${'═'.repeat(63)}\n`);
+
+  const gradleArgs = [
+    '--no-daemon', '--quiet', '--console=plain',
+    `-Pmlsh.mlcp.command=${invocation.command}`,
+    `-Pmlsh.mlcp.options=${JSON.stringify(invocation.properties)}`,
+    `-Pmlsh.mlcp.extraArgs=${JSON.stringify(invocation.extraArgs)}`,
+    `-Pmlsh.mlcp.jvmArgs=${JSON.stringify(jvmArgs)}`,
+    'mlshMlcp'
+  ];
+
+  const result = await runProcess(gradlew, gradleArgs, {
     cwd: gradleRunnerDirectory(context),
-    env,
+    env: context.processEnvironment,
     inherit: true,
-    logFile: resolvedLogFile
+    logFile: resolvedLogFile,
+    appendLogFile: true
   });
-  console.log('═══════════════════════════════════════════════════════════');
-  console.log(`MLCP completed with exit code: ${result.code}`);
+  console.log(`\nMLCP completed with exit code: ${result.code}`);
   console.log(`Full output saved to: ${resolvedLogFile}`);
+  if (result.code !== 0) printLogTail(resolvedLogFile);
   return result.code;
+}
+
+// Prints the last handful of lines of a failed run's log directly to the
+// console, so a failure is readable without opening the file separately -
+// this is deliberately printed to normal (non-alt-screen) stdout so it's
+// easy to select/copy from a terminal.
+function printLogTail(logFile, maxLines = 60) {
+  try {
+    const lines = fs.readFileSync(logFile, 'utf8').split(/\r?\n/);
+    const tail = lines.slice(-maxLines).join('\n');
+    console.log(`\n----- last ${Math.min(maxLines, lines.length)} lines of ${logFile} -----`);
+    console.log(tail);
+    console.log('----- end of log excerpt -----');
+  } catch {
+    // Best-effort only; the caller already has the log file path to check manually.
+  }
+}
+
+// Builds the plain-text diagnostics block written to the top of every job's
+// log file (and printed to the console) - resolved environment(s), exactly
+// where each came from, whether insecure=true was actually detected (and if
+// not, why), and the trust store state. This exists so a failure can be
+// diagnosed from the log alone, without guessing or re-running.
+export function diagnosticsHeader({ name, directory, invocation, environments, untrustedEntries, trust, jvmArgs, logFile }) {
+  const lines = [];
+  lines.push(`MLSH MLCP job: ${name} (${directory})`);
+  lines.push(`Command: ${invocation.command}`);
+  lines.push(`Log file: ${logFile}`);
+  lines.push('');
+  for (const [role, environment] of Object.entries(environments)) {
+    if (!environment) continue;
+    const source = environment._file ? environment._file : '(active environment / process env vars)';
+    const insecureSource = environment._insecureExplicit ? `explicitly set in ${source}` : `not set - defaulted to false`;
+    lines.push(`${role}: '${environment.name}' -> ${environment.protocol}://${environment.host}:${environment.port}`);
+    lines.push(`  source: ${source}`);
+    lines.push(`  insecure=${isInsecure(environment)} (${insecureSource})`);
+    if (String(environment.protocol).toLowerCase() === 'https' && !isInsecure(environment)) {
+      lines.push(`  WARNING: protocol is https but insecure is not true - the JVM will require this`);
+      lines.push(`           certificate to validate against the system's default CA trust store.`);
+      lines.push(`           If this server uses a self-signed or internal certificate, add`);
+      lines.push(`           'insecure=true' to ${source === '(active environment / process env vars)' ? "this environment's file" : source}.`);
+    }
+  }
+  lines.push('');
+  if (untrustedEntries.length) {
+    lines.push(`Trust-on-first-use requested for: ${untrustedEntries.map(entry => `${entry.host}:${entry.port}`).join(', ')}`);
+    if (trust) {
+      lines.push(`Trust store: ${trust.trustStorePath} (${trust.trustStoreType})`);
+      for (const entry of trust.imported) lines.push(`  imported alias '${entry.alias}': ${entry.subject}`);
+    } else {
+      lines.push('Trust store: not built (see errors above, if any).');
+    }
+  } else {
+    lines.push('No environment in this job requested insecure=true; using the default JVM trust store.');
+  }
+  lines.push(`JVM args: ${jvmArgs.length ? jvmArgs.join(' ') : '(none)'}`);
+  return lines.join('\n');
 }
 
 const USAGE = `Usage: mlsh mlcp [import|export|copy] [job]

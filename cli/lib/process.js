@@ -16,7 +16,7 @@ export function runProcess(command, args, options = {}) {
     });
     const stdout = [];
     const stderr = [];
-    const logStream = capture ? fs.createWriteStream(options.logFile) : null;
+    const logStream = capture ? fs.createWriteStream(options.logFile, { flags: options.appendLogFile ? 'a' : 'w' }) : null;
 
     if (!options.inherit || capture) {
       const handle = (chunks, streamName) => (chunk) => {

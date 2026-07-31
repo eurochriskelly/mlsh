@@ -90,10 +90,12 @@ export function loadActiveEnvironment(home = os.homedir(), processEnvironment = 
   const directory = configDirectory(home);
   const selected = fromProcess.name || currentEnvironment(home);
   let stored = {};
+  let file = null;
 
   if (selected) {
-    const file = environmentPath(selected, directory);
+    file = environmentPath(selected, directory);
     if (fs.existsSync(file)) stored = parseEnvironment(fs.readFileSync(file, 'utf8'));
+    else file = null;
   }
 
   if (Object.keys(stored).length === 0) {
@@ -102,7 +104,8 @@ export function loadActiveEnvironment(home = os.homedir(), processEnvironment = 
   }
 
   if (!selected && !fromProcess.name && !stored.name) return null;
-  return { ...DEFAULTS, ...stored, ...fromProcess, name: fromProcess.name || stored.name || selected };
+  const insecureExplicit = Object.prototype.hasOwnProperty.call(stored, 'insecure') || Object.prototype.hasOwnProperty.call(fromProcess, 'insecure');
+  return { ...DEFAULTS, ...stored, ...fromProcess, name: fromProcess.name || stored.name || selected, _file: file, _insecureExplicit: insecureExplicit };
 }
 
 export function loadNamedEnvironment(name, home = os.homedir()) {
@@ -110,7 +113,9 @@ export function loadNamedEnvironment(name, home = os.homedir()) {
   const directory = configDirectory(home);
   const file = environmentPath(name, directory);
   if (!fs.existsSync(file)) throw new Error(`Environment '${name}' does not exist. Run 'mlsh env' to create it.`);
-  return { ...defaultEnvironment(name), ...parseEnvironment(fs.readFileSync(file, 'utf8')), name };
+  const content = fs.readFileSync(file, 'utf8');
+  const stored = parseEnvironment(content);
+  return { ...defaultEnvironment(name), ...stored, name, _file: file, _insecureExplicit: Object.prototype.hasOwnProperty.call(stored, 'insecure') };
 }
 
 export function environmentVariables(environment) {

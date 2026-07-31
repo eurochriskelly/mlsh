@@ -25,6 +25,7 @@ import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './c
 import {
   buildMlcpInvocation,
   classifyJobFields,
+  diagnosticsHeader,
   insecureEntries,
   jobBaseName,
   jobDirectory,
@@ -49,6 +50,7 @@ import {
   generateShellConfig,
   isInsecure,
   loadActiveEnvironment,
+  loadNamedEnvironment,
   listEnvironments,
   parseEnvironment,
   parseShellEnvironment,
@@ -138,6 +140,29 @@ try {
     assert.equal(isInsecure({ insecure: 'false' }), false);
     assert.equal(isInsecure({}), false);
     assert.equal(isInsecure(undefined), false);
+  });
+
+  await test('loadNamedEnvironment reports the source file and whether insecure was explicitly set (vs. defaulted)', () => {
+    const envHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-env-explicit-'));
+    const directory = configDirectory(envHome);
+    fs.mkdirSync(directory, { recursive: true });
+
+    // An environment file predating the insecure= feature: no such line at all.
+    const legacyFile = environmentPath('legacy', directory);
+    fs.writeFileSync(legacyFile, 'name=legacy\nprotocol=https\nhost=old.example.com\nport=8000\nuser=admin\npass=admin\n');
+    const legacy = loadNamedEnvironment('legacy', envHome);
+    assert.equal(legacy._file, legacyFile);
+    assert.equal(legacy._insecureExplicit, false);
+    assert.equal(isInsecure(legacy), false);
+
+    // An environment file that explicitly opts in.
+    const explicitFile = environmentPath('explicit', directory);
+    fs.writeFileSync(explicitFile, 'name=explicit\nprotocol=https\nhost=new.example.com\nport=8000\nuser=admin\npass=admin\ninsecure=true\n');
+    const explicit = loadNamedEnvironment('explicit', envHome);
+    assert.equal(explicit._insecureExplicit, true);
+    assert.equal(isInsecure(explicit), true);
+
+    fs.rmSync(envHome, { recursive: true, force: true });
   });
 
   await test('process: runProcess with logFile tees inherited output to a file as well as the terminal', async () => {
@@ -781,12 +806,16 @@ printf '200'
           const trust = await ensureTrustedCertificates([{ host: '127.0.0.1', port }], trustHome);
           assert.equal(trust.trustStorePath, trustStorePath(trustHome));
           assert.ok(fs.existsSync(trust.trustStorePath));
+          assert.equal(trust.imported.length, 1);
+          assert.equal(trust.imported[0].alias, certificateAlias('127.0.0.1', port));
 
           const listing = spawnSync('keytool', ['-list', '-keystore', trust.trustStorePath, '-storepass', trust.trustStorePassword, '-alias', certificateAlias('127.0.0.1', port)]);
           assert.equal(listing.status, 0, listing.stderr?.toString());
 
-          // Calling again is a no-op (trust-on-first-use, not trust-every-time) - it must not throw or duplicate the alias.
-          await ensureTrustedCertificates([{ host: '127.0.0.1', port }], trustHome);
+          // Re-running (e.g. a second job against the same host) must not throw
+          // or leave duplicate/stale entries behind.
+          const second = await ensureTrustedCertificates([{ host: '127.0.0.1', port }], trustHome);
+          assert.equal(second.imported.length, 1);
         });
       } finally {
         server.close();
@@ -802,6 +831,36 @@ printf '200'
     const summary = redactedSummary({ command: 'IMPORT', properties: { password: 'secret', output_password: 'secret2', input_file_path: 'x' } });
     assert.doesNotMatch(summary, /secret/);
     assert.match(summary, /\*{8}/);
+  });
+
+  await test('mlcp: diagnosticsHeader warns when https is used without insecure=true, and shows exactly where insecure came from', () => {
+    const noWarning = diagnosticsHeader({
+      name: '001',
+      directory: '/project/.jobs/mlcp/import',
+      invocation: { command: 'IMPORT' },
+      environments: { envTo: { name: 'dev', protocol: 'https', host: 'ml.example.com', port: '8000', _file: '/home/.mlsh/environments/dev.env', _insecureExplicit: true, insecure: 'true' } },
+      untrustedEntries: [{ host: 'ml.example.com', port: '8000' }],
+      trust: { trustStorePath: '/home/.mlsh/trust-store.jks', trustStoreType: 'PKCS12', imported: [{ alias: 'ml.example.com_8000', subject: 'subject=CN=ml.example.com' }] },
+      jvmArgs: ['-Djavax.net.ssl.trustStore=/home/.mlsh/trust-store.jks'],
+      logFile: '/home/.mlsh/mlcp-logs/import-001.log'
+    });
+    assert.doesNotMatch(noWarning, /WARNING/);
+    assert.match(noWarning, /insecure=true \(explicitly set in \/home\/\.mlsh\/environments\/dev\.env\)/);
+    assert.match(noWarning, /imported alias 'ml\.example\.com_8000': subject=CN=ml\.example\.com/);
+
+    const warned = diagnosticsHeader({
+      name: '001',
+      directory: '/project/.jobs/mlcp/import',
+      invocation: { command: 'IMPORT' },
+      environments: { envTo: { name: 'dev_fs', protocol: 'https', host: 'old.example.com', port: '8000', _file: '/home/.mlsh/environments/dev_fs.env', _insecureExplicit: false, insecure: 'false' } },
+      untrustedEntries: [],
+      trust: null,
+      jvmArgs: [],
+      logFile: '/home/.mlsh/mlcp-logs/import-001.log'
+    });
+    assert.match(warned, /WARNING: protocol is https but insecure is not true/);
+    assert.match(warned, /insecure=false \(not set - defaulted to false\)/);
+    assert.match(warned, /add\s*\n\s*'insecure=true' to \/home\/\.mlsh\/environments\/dev_fs\.env/);
   });
 
   await test('mlcp-tui: buildHeaderRow renders the sidebar and content titles at the requested widths', () => {
@@ -842,7 +901,19 @@ printf '200'
       const capturedEnvPath = path.join(gradleRunnerDir, 'captured-env.json');
       const fakeGradlew = path.join(gradleRunnerDir, 'gradlew');
       fs.writeFileSync(fakeGradlew, `#!/bin/sh
-node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({command: process.env.MLSH_MLCP_COMMAND, options: JSON.parse(process.env.MLSH_MLCP_OPTIONS_JSON), extra: JSON.parse(process.env.MLSH_MLCP_EXTRA_ARGS_JSON)}))" "${capturedEnvPath}"
+node -e "
+const fs = require('fs');
+const prop = (name) => {
+  const prefix = '-P' + name + '=';
+  const arg = process.argv.find((a) => a.startsWith(prefix));
+  return arg ? arg.slice(prefix.length) : undefined;
+};
+fs.writeFileSync(process.argv[1], JSON.stringify({
+  command: prop('mlsh.mlcp.command'),
+  options: JSON.parse(prop('mlsh.mlcp.options')),
+  extra: JSON.parse(prop('mlsh.mlcp.extraArgs'))
+}));
+" "${capturedEnvPath}" "$@"
 echo "mlcp fake stdout line"
 `);
       fs.chmodSync(fakeGradlew, 0o755);
@@ -853,7 +924,7 @@ echo "mlcp fake stdout line"
         encoding: 'utf8'
       });
       assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-      assert.match(result.stdout, /MLCP job: 123/);
+      assert.match(result.stdout, /MLSH MLCP job: 123/);
       assert.match(result.stdout, /mlcp fake stdout line/);
       const captured = JSON.parse(fs.readFileSync(capturedEnvPath, 'utf8'));
       assert.equal(captured.command, 'IMPORT');

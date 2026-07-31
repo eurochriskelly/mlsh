@@ -35,6 +35,12 @@ dependencies {
 	// mlcp 11.2+ dropped logback as a direct dependency; without it, mlcp
 	// prints no logging output at all.
 	mlcp "ch.qos.logback:logback-classic:1.5.32"
+
+	// Without a logback config, Hadoop's own (very chatty, DEBUG-level)
+	// logging floods the output and buries mlcp's own progress/error
+	// messages. lib/logback.xml keeps the root logger at WARN and only
+	// com.marklogic at INFO, matching ml-gradle's own mlcp-project example.
+	mlcp files("lib")
 }
 
 tasks.register("mlshMlcp", com.marklogic.gradle.task.MlcpTask) {

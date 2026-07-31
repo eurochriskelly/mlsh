@@ -275,9 +275,30 @@ export function resolveEnvironmentsForOperation(operation, meta, context) {
   };
 }
 
+// MlcpTask/mlcp options that accept filesystem paths. mlcp's own working
+// directory is the bundled Gradle runner's directory (gradle/mlcp/), not
+// wherever the user ran `mlsh mlcp` from - so relative paths here must be
+// resolved against baseDirectory before being handed to mlcp, or they'd
+// silently be looked up in the wrong place.
+const PATH_OPTION_KEYS = ['input_file_path', 'output_file_path', 'output_directory', 'conf', 'hadoop_conf_dir'];
+
+// Pure: resolves any relative filesystem-path options against baseDirectory,
+// leaving absolute paths untouched.
+export function resolvePathOptions(properties, baseDirectory) {
+  const resolved = { ...properties };
+  for (const key of PATH_OPTION_KEYS) {
+    if (typeof resolved[key] === 'string' && !path.isAbsolute(resolved[key])) {
+      resolved[key] = path.resolve(baseDirectory, resolved[key]);
+    }
+  }
+  return resolved;
+}
+
 // Pure: combines classified job fields and resolved environments into the
-// final MlcpTask property map, extra args, and mlcp command name.
-export function buildMlcpInvocation(operation, fields, environments) {
+// final MlcpTask property map, extra args, and mlcp command name. Relative
+// path options are resolved against baseDirectory (defaulting to the
+// current working directory, i.e. wherever `mlsh mlcp` was run from).
+export function buildMlcpInvocation(operation, fields, environments, baseDirectory = process.cwd()) {
   const { meta, properties, extraArgs } = classifyJobFields(operation, fields);
 
   let finalProperties;
@@ -297,7 +318,7 @@ export function buildMlcpInvocation(operation, fields, environments) {
     };
   }
 
-  return { command: operation.toUpperCase(), properties: finalProperties, extraArgs, meta };
+  return { command: operation.toUpperCase(), properties: resolvePathOptions(finalProperties, baseDirectory), extraArgs, meta };
 }
 
 export function redactedSummary({ command, properties }) {
@@ -375,6 +396,9 @@ export async function executeInvocation(context, operation, name, fields, direct
 
   console.log(`MLCP job: ${name} (${directory})`);
   context.logger.info(`mlcp job: ${name} ${redactedSummary(invocation)}`);
+  for (const [role, environment] of Object.entries(environments)) {
+    if (environment) console.log(`  ${role}: ${environment.name} - ${environment.protocol}://${environment.host}:${environment.port} (insecure=${isInsecure(environment)})`);
+  }
 
   const gradlew = gradlewExecutable(context);
   if (!fs.existsSync(gradlew)) throw new Error(`Bundled MLCP runner not found at ${gradlew}.`);
@@ -390,6 +414,7 @@ export async function executeInvocation(context, operation, name, fields, direct
         `-Djavax.net.ssl.trustStorePassword=${trust.trustStorePassword}`,
         `-Djavax.net.ssl.trustStoreType=${trust.trustStoreType}`
       ];
+      console.log(`Trust store ready: ${trust.trustStorePath} (${trust.trustStoreType})`);
     }
   }
 

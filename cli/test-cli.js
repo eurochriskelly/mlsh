@@ -36,6 +36,7 @@ import {
   redactedSummary,
   resolveEnvironmentsForOperation,
   resolveJobFile,
+  resolvePathOptions,
   validateJobName
 } from './commands/mlcp.js';
 import { buildHeaderRow as buildMlcpHeaderRow, buildStatusLine as buildMlcpStatusLine } from './commands/mlcp-tui.js';
@@ -654,11 +655,11 @@ printf '200'
 
   await test('mlcp: buildMlcpInvocation fills in import connection details and database default', () => {
     const envTo = { host: 'localhost', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'content' };
-    const invocation = buildMlcpInvocation('import', { input_file_path: 'data/import' }, { envTo });
+    const invocation = buildMlcpInvocation('import', { input_file_path: 'data/import' }, { envTo }, '/project');
     assert.equal(invocation.command, 'IMPORT');
     assert.deepEqual(invocation.properties, {
       database: 'content',
-      input_file_path: 'data/import',
+      input_file_path: path.join('/project', 'data/import'),
       host: 'localhost',
       port: 8000,
       username: 'admin',
@@ -668,14 +669,40 @@ printf '200'
 
   await test('mlcp: buildMlcpInvocation requires input_file_path for import and output_file_path for export', () => {
     const env = { host: 'localhost', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'content' };
-    assert.throws(() => buildMlcpInvocation('import', {}, { envTo: env }), /input_file_path/);
-    assert.throws(() => buildMlcpInvocation('export', {}, { envFrom: env }), /output_file_path/);
+    assert.throws(() => buildMlcpInvocation('import', {}, { envTo: env }, '/project'), /input_file_path/);
+    assert.throws(() => buildMlcpInvocation('export', {}, { envFrom: env }, '/project'), /output_file_path/);
   });
 
   await test('mlcp: buildMlcpInvocation sets ssl for https environments', () => {
     const envTo = { host: 'ml.example.com', port: '8000', user: 'admin', pass: 'admin', protocol: 'https', content_db: 'content' };
-    const invocation = buildMlcpInvocation('import', { input_file_path: 'x' }, { envTo });
+    const invocation = buildMlcpInvocation('import', { input_file_path: 'x' }, { envTo }, '/project');
     assert.equal(invocation.properties.ssl, true);
+  });
+
+  await test('mlcp: buildMlcpInvocation resolves relative path options against baseDirectory, leaving absolute paths untouched', () => {
+    const envTo = { host: 'localhost', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'content' };
+    const relative = buildMlcpInvocation('import', { input_file_path: 'data/import' }, { envTo }, '/project');
+    assert.equal(relative.properties.input_file_path, path.join('/project', 'data/import'));
+
+    const absolute = buildMlcpInvocation('import', { input_file_path: '/absolute/data/import' }, { envTo }, '/project');
+    assert.equal(absolute.properties.input_file_path, '/absolute/data/import');
+
+    const envFrom = { host: 'localhost', port: '8000', user: 'admin', pass: 'admin', protocol: 'http', content_db: 'content' };
+    const exported = buildMlcpInvocation('export', { output_file_path: 'data/export' }, { envFrom }, '/project');
+    assert.equal(exported.properties.output_file_path, path.join('/project', 'data/export'));
+  });
+
+  await test('mlcp: resolvePathOptions only touches known path-like keys and leaves everything else untouched', () => {
+    const resolved = resolvePathOptions({
+      input_file_path: 'data/import',
+      output_directory: '/already/absolute',
+      thread_count: 4,
+      output_uri_prefix: '/data/'
+    }, '/project');
+    assert.equal(resolved.input_file_path, path.join('/project', 'data/import'));
+    assert.equal(resolved.output_directory, '/already/absolute');
+    assert.equal(resolved.thread_count, 4);
+    assert.equal(resolved.output_uri_prefix, '/data/');
   });
 
   await test('mlcp: buildMlcpInvocation builds distinct input_/output_ connection details for copy', () => {
@@ -830,7 +857,7 @@ echo "mlcp fake stdout line"
       assert.match(result.stdout, /mlcp fake stdout line/);
       const captured = JSON.parse(fs.readFileSync(capturedEnvPath, 'utf8'));
       assert.equal(captured.command, 'IMPORT');
-      assert.equal(captured.options.input_file_path, 'data/import');
+      assert.equal(captured.options.input_file_path, path.join(fs.realpathSync(project), 'data/import'));
       assert.equal(captured.options.output_collections, 'foo,bar');
       assert.equal(captured.options.host, 'localhost');
       assert.equal(captured.options.username, 'admin');

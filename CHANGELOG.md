@@ -44,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   store is explicitly created and loaded as PKCS12 (matching `keytool`'s actual default output
   format since JDK 9), rather than being mislabeled as JKS - a mismatch that made the JVM
   silently fall back to the default trust store and reproduce the original certificate error.
+- `mlcp` job runs now print which environment(s) they resolved (host/protocol/insecure) so it's
+  obvious at a glance whether `insecure=true` was actually detected for a given run.
+- Relative paths in mlcp options (`input_file_path`, `output_file_path`, `output_directory`,
+  `conf`, `hadoop_conf_dir`) are now resolved against the directory `mlsh mlcp` was run from,
+  instead of the bundled Gradle runner's own directory - previously, the default job templates'
+  own relative paths (e.g. `.jobs/mlcp/import/data/001`) would silently fail to be found.
+- Bundled a `logback.xml` for the MLCP runner (matching ml-gradle's own mlcp-project example),
+  quieting Hadoop's very chatty DEBUG-level logging so mlcp's actual progress/error messages are
+  no longer buried in noise.
 
 ### Removed
 

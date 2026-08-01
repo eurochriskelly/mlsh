@@ -15,7 +15,7 @@ import {
   saveEditedEnvironment,
   writeEnvironment
 } from './lib/environment-files.js';
-import { edit } from './lib/editor.js';
+import { editOnTty } from './lib/editor.js';
 import { parseExistingMlshrc } from './lib/parser.js';
 
 const home = process.env.HOME || os.homedir();
@@ -126,7 +126,7 @@ export async function runEnvironmentManager(args = []) {
     if (!name) return;
   }
   const file = writeEnvironment(name, directory);
-  edit(file);
+  editOnTty(file);
   const saved = saveEditedEnvironment(file, directory);
   const settings = activateEnvironment(saved.name, directory, home);
   console.log(`\nActive environment: ${settings.name} (${settings.protocol}://${settings.host}:${settings.port})`);

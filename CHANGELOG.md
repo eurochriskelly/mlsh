@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `edit()` (used by `mlsh env` and, as a fallback, `mlsh mlcp`'s job creation/editing outside the
+  TUI) now always prefers the real controlling terminal (`/dev/tty`) over the current process's
+  own stdio, instead of only doing so in one specific code path. Any editor invocation reachable
+  through `mlsh_run` inside the interactive shell was equally vulnerable to the same
+  `tee`-pipe/`EAGAIN` crash the MLCP TUI's "new job" flow had; this closes it everywhere at once.
 - The MLCP TUI's "new job" flow (`n`) now edits the job file via the same controlling-terminal
   path used everywhere else in MLSH, instead of inheriting the current process's stdio - which
   could crash the interactive shell's `tee`-based session logging with `EAGAIN`/"Resource

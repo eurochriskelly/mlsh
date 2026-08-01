@@ -329,12 +329,9 @@ export function redactedSummary({ command, properties }) {
   return `${command} ${JSON.stringify(safe)}`;
 }
 
-// editFn defaults to edit() for direct CLI usage (inherits the current
-// process's stdio, which is correct there). The TUI passes editOnTty()
-// instead, since it has already taken over /dev/tty directly and suspended
-// its alt-screen session - inheriting process.stdout there would attach the
-// editor to the wrong stream (e.g. the interactive shell's `tee` pipe) and
-// leave the terminal in a broken state.
+// editFn defaults to edit(), which always prefers the real controlling
+// terminal (/dev/tty) over whatever stdio the current process happens to
+// have - see lib/editor.js. The editFn parameter mainly exists for tests.
 export function createAndEditJob(directory, operation, name, { temporary = false, editFn = edit } = {}) {
   fs.mkdirSync(directory, { recursive: true });
   const workingFile = temporary ? path.join(directory, `.new-${process.pid}.job`) : resolveJobFile(directory, name);

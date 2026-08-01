@@ -20,6 +20,7 @@ import {
   sidebarWindow
 } from './commands/eval-tui.js';
 import { openControllingTty, paintRow, padTo, truncateVisible, visibleLength, watchResize } from './lib/tui.js';
+import { edit, editor, editOnTty } from './lib/editor.js';
 import { runProcess } from './lib/process.js';
 import { normalisePattern, parseModuleRecord, resolveModuleWorkspace } from './commands/modules.js';
 import {
@@ -597,6 +598,72 @@ printf '200'
     const context = createContext({ topDir: path.resolve('.'), processEnvironment: { HOME: home } });
     assert.equal(context.environment.name, 'dev');
     assert.equal(context.environment.host, 'localhost');
+  });
+
+  await test('mlsh env: bare interactive flow lists environments, selects by number, edits, and activates', () => {
+    const envHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-env-cli-'));
+    const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-env-editor-'));
+    try {
+      const envDirectory = configDirectory(envHome);
+      writeEnvironment('alpha', envDirectory);
+      writeEnvironment('beta', envDirectory);
+
+      // A no-op "editor" that simply exits successfully without changing the file,
+      // matching how a user might open, glance at, and close their editor unchanged.
+      const fakeEditor = path.join(fakeBin, 'fake-editor');
+      fs.writeFileSync(fakeEditor, '#!/bin/sh\nexit 0\n');
+      fs.chmodSync(fakeEditor, 0o755);
+
+      const result = spawnSync(process.execPath, [path.resolve('bin/mlsh'), 'env'], {
+        input: '1\n',
+        env: { ...process.env, HOME: envHome, EDITOR: fakeEditor },
+        encoding: 'utf8'
+      });
+      assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+      assert.match(result.stdout, /1\. alpha/);
+      assert.match(result.stdout, /2\. beta/);
+      assert.match(result.stdout, /Active environment: alpha/);
+      assert.equal(fs.readFileSync(path.join(envHome, '.mlsh', 'current-env'), 'utf8').trim(), 'alpha');
+      assert.ok(fs.existsSync(path.join(envHome, '.mlshrc-gen')));
+    } finally {
+      fs.rmSync(envHome, { recursive: true, force: true });
+      fs.rmSync(fakeBin, { recursive: true, force: true });
+    }
+  });
+
+  await test('editor: honors $EDITOR, and edit()/editOnTty() run it and fall back gracefully without a controlling terminal', () => {
+    const previousEditor = process.env.EDITOR;
+    const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-editor-'));
+    try {
+      const fakeEditor = path.join(fakeBin, 'fake-editor');
+      const marker = path.join(fakeBin, 'was-invoked');
+      fs.writeFileSync(fakeEditor, `#!/bin/sh\ntouch "${marker}"\nexit 0\n`);
+      fs.chmodSync(fakeEditor, 0o755);
+      process.env.EDITOR = fakeEditor;
+      assert.equal(editor(), fakeEditor);
+
+      const target = path.join(fakeBin, 'target.job');
+      fs.writeFileSync(target, '');
+      // edit() and editOnTty() are the same function (see lib/editor.js); both
+      // must run the editor successfully even with no controlling terminal
+      // available (exactly the environment this test suite runs in), falling
+      // back to inherited stdio rather than throwing.
+      assert.doesNotThrow(() => edit(target));
+      assert.ok(fs.existsSync(marker), 'fake editor should have been invoked by edit()');
+      fs.rmSync(marker);
+      assert.doesNotThrow(() => editOnTty(target));
+      assert.ok(fs.existsSync(marker), 'fake editor should have been invoked by editOnTty()');
+
+      const failingEditor = path.join(fakeBin, 'failing-editor');
+      fs.writeFileSync(failingEditor, '#!/bin/sh\nexit 7\n');
+      fs.chmodSync(failingEditor, 0o755);
+      process.env.EDITOR = failingEditor;
+      assert.throws(() => edit(target), /Editor exited with status 7/);
+    } finally {
+      if (previousEditor === undefined) delete process.env.EDITOR;
+      else process.env.EDITOR = previousEditor;
+      fs.rmSync(fakeBin, { recursive: true, force: true });
+    }
   });
 
   await test('mlcp: validateJobName accepts safe names and rejects unsafe ones', () => {

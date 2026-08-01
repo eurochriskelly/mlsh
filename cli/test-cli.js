@@ -631,6 +631,29 @@ printf '200'
     }
   });
 
+  await test('mlsh env: fails loudly instead of silently exiting when stdin closes before an answer is given', () => {
+    const envHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-env-nostdin-'));
+    try {
+      const envDirectory = configDirectory(envHome);
+      writeEnvironment('alpha', envDirectory);
+
+      // Regression test: previously, if stdin closed (EOF) before the user
+      // answered the "Select an environment" prompt - e.g. no real
+      // controlling terminal attached - the process would exit with status
+      // 0 and no explanation whatsoever, indistinguishable from the command
+      // just silently closing. It must now fail loudly instead.
+      const result = spawnSync(process.execPath, [path.resolve('bin/mlsh'), 'env'], {
+        input: '',
+        env: { ...process.env, HOME: envHome },
+        encoding: 'utf8'
+      });
+      assert.notEqual(result.status, 0, `expected a non-zero exit, got 0 with stdout:\n${result.stdout}`);
+      assert.match(result.stdout + result.stderr, /stdin closed before a response was given/);
+    } finally {
+      fs.rmSync(envHome, { recursive: true, force: true });
+    }
+  });
+
   await test('editor: honors $EDITOR, and edit()/editOnTty() run it and fall back gracefully without a controlling terminal', () => {
     const previousEditor = process.env.EDITOR;
     const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'mlsh-editor-'));

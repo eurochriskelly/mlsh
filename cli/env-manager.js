@@ -59,11 +59,33 @@ function writeMigratedEnvironment(name, variables) {
 }
 
 function prompt(question) {
-  const input = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(resolve => input.question(question, answer => {
-    input.close();
-    resolve(answer.trim());
-  }));
+  return new Promise((resolve, reject) => {
+    const input = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
+    let answered = false;
+    input.once('error', (error) => {
+      if (answered) return;
+      answered = true;
+      input.close();
+      reject(new Error(`Reading input failed: ${error.message}`));
+    });
+    // If stdin ends before an answer is given (e.g. no controlling terminal,
+    // or a broken pipe upstream), readline's `close` event fires without
+    // ever calling the `question()` callback - which would otherwise look
+    // exactly like the prompt silently doing nothing and the command
+    // finishing early. Surface that plainly instead of hanging or resolving
+    // to a false empty answer.
+    input.once('close', () => {
+      if (answered) return;
+      answered = true;
+      reject(new Error('No input available to answer the prompt (stdin closed before a response was given). Is a real terminal attached?'));
+    });
+    input.question(question, (answer) => {
+      if (answered) return;
+      answered = true;
+      input.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 async function chooseEnvironment(environments) {

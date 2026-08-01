@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `mlsh env` (and any other prompt built on `ask()`/`confirm()`) no longer exits silently with
+  status 0 and no explanation if stdin closes before the user answers - e.g. no real controlling
+  terminal attached. Previously the prompt's promise never settled and nothing else kept Node's
+  event loop alive, so the process just exited once the list/prompt text had been printed,
+  indistinguishable from the command doing nothing. It now fails with a clear error instead.
+- `runCli()` now reports failures from context initialization itself (loading the active
+  environment, preparing log files, etc.) instead of only catching errors from the command that
+  was dispatched - previously a failure that early could look like a silent close with no output.
 - `edit()` (used by `mlsh env` and, as a fallback, `mlsh mlcp`'s job creation/editing outside the
   TUI) now always prefers the real controlling terminal (`/dev/tty`) over the current process's
   own stdio, instead of only doing so in one specific code path. Any editor invocation reachable

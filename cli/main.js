@@ -1,3 +1,4 @@
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runEnvironmentManager } from './env-manager.js';
@@ -35,9 +36,28 @@ export function createContext({ topDir, processEnvironment = process.env } = {})
 }
 
 export async function runCli(args, options = {}) {
-  const context = options.context || createContext(options);
   const command = args[0] || 'help';
   const commandArgs = args.slice(1);
+
+  let context;
+  try {
+    context = options.context || createContext(options);
+  } catch (error) {
+    // createContext() runs before there's a logger to report through, and
+    // before the command dispatch try/catch below - without this, any
+    // failure here (a broken environment file, a permissions error creating
+    // ~/.mlsh, etc.) would look exactly like the command silently closing
+    // with no output at all, instead of a diagnosable error.
+    console.error(`mlsh ${command}: failed to initialize (${error.message})`);
+    if (error.stack) console.error(error.stack);
+    try {
+      const home = (options.processEnvironment || process.env).HOME || os.homedir();
+      fs.appendFileSync(path.join(home, '.mlsh', 'mlsh.log'), `[${new Date().toISOString()}] FATAL command=${command} failed to initialize: ${error.stack || error.message}\n`);
+    } catch {
+      // Best-effort only; we've already printed the error above.
+    }
+    return 1;
+  }
 
   if (!WITHOUT_ENVIRONMENT.has(command) && !context.environment) {
     console.error("No environment selected. Please run 'mlsh env'.");
